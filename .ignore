@@ -1,0 +1,4 @@
+# Игнорирование graft при ripgrep поиске
+!graft/
+graft/.cache/
+graft/.graph/

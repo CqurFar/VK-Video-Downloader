@@ -1,0 +1,67 @@
+[project]
+name = "vk-downloader"
+version = "2.1.0"
+description = "VK Video playlist downloader via running Firefox (WebDriver + DASH segments + ffmpeg)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+vk-dl = "vk_downloader.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.4",
+    "pre-commit>=4.0",
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes: неиспользуемые импорты/переменные
+    "I",   # isort: порядок импортов
+    "B",   # bugbear: вероятные баги
+    "UP",  # pyupgrade: современные идиомы
+    "SIM", # упрощение конструкций
+    "C4",  # comprehensions
+    "RUF", # собственные правила ruff
+]
+ignore = [
+    # Широкие except Exception в браузерном слое — осознанные защитные границы
+    # вокруг WebDriver/WinAPI/сети; точечные замены отслеживаются в ревью.
+    "BLE001",
+    # Кириллица в комментариях и докстрингах — стандарт этого проекта;
+    # "неоднозначные" юникод-символы здесь ложные срабатывания.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Синхронный WebDriver-клиент внутри async-методов: перевод на to_thread запланирован
+"src/vk_downloader/browser/*" = ["ASYNC210", "ASYNC220", "ASYNC230"]
+# Многострочные JS-литералы (PLAYER_JS и др.) не переносятся без поломки кода
+"src/vk_downloader/browser/media_browser.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["vk_downloader"]
+
+[tool.ruff.format]
+quote-style = "double"

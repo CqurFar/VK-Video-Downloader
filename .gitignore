@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+build/
+dist/
+wheels/
+
+# IDE / окружение / кэш
+.venv/
+.idea/
+.opencode/
+.ruff_cache/
+
+# Внутренний инструмент
+/graft/
+
+# Рабочие артефакты загрузчика
+/downloaded/
+urls.txt
+failed.txt
+
+# Локальные файлы
+packages/ffmpeg/*
+packages/geckodriver/*
+packages/firefox_profile/*
+
+!packages/ffmpeg/.gitkeep
+!packages/geckodriver/.gitkeep
+!packages/firefox_profile/.gitkeep
