@@ -1,0 +1,145 @@
+import time
+import requests
+from vk_downloader.core.errors import WebDriverError
+
+
+class FirefoxRemoteSession:
+    """WEBDRIVER-КЛИЕНТ ДЛЯ ПОДКЛЮЧЕНИЯ К СЕССИИ FIREFOX"""
+
+    def __init__(self, endpoint: str, session_id: str):
+        self.endpoint = endpoint.rstrip("/")
+        self.session_id = session_id
+
+    # Базовый запрос к WebDriver API
+    def _request(self, method: str, path: str, data=None):
+        response = requests.request(
+            # Перегруженный Firefox отвечает медленно: короткий таймаут даёт ложные обрывы
+            method,
+            f"{self.endpoint}{path}",
+            json=data,
+            timeout=120,
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise WebDriverError(f"WebDriver returned HTTP {response.status_code}") from exc
+        value = payload.get("value")
+        if response.status_code >= 400 or (isinstance(value, dict) and value.get("error")):
+            value = value if isinstance(value, dict) else {}
+            message = value.get("message") or str(value)
+            # geckodriver не смог достучаться до Marionette в запущенном Firefox
+            if "marionette" in message.lower() or "connection refused" in message.lower():
+                raise WebDriverError("Marionette is disabled in the running Firefox")
+            raise WebDriverError(message)
+        return value
+
+    # Создание новой WebDriver-сессии
+    @classmethod
+    def create(cls, endpoint: str) -> "FirefoxRemoteSession":
+        response = requests.post(
+            f"{endpoint.rstrip('/')}/session",
+            json={"capabilities": {"alwaysMatch": {"browserName": "firefox"}}},
+            timeout=30,
+        )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise WebDriverError(
+                f"Invalid WebDriver response: HTTP {response.status_code}"
+            ) from exc
+        value = payload.get("value", {})
+        if response.status_code >= 400 or (isinstance(value, dict) and value.get("error")):
+            message = value.get("message") if isinstance(value, dict) else str(value)
+            message = message or str(value)
+            if "marionette" in message.lower() or "connection refused" in message.lower():
+                raise WebDriverError("Marionette is disabled in the running Firefox")
+            raise WebDriverError(message)
+        session_id = payload.get("sessionId") or value.get("sessionId")
+        if not session_id:
+            raise WebDriverError("WebDriver did not return sessionId")
+        return cls(endpoint, session_id)
+
+    # Подключение к уже существующей сессии geckodriver
+    @classmethod
+    def from_existing(cls, endpoint: str) -> "FirefoxRemoteSession | None":
+        try:
+            response = requests.get(f"{endpoint.rstrip('/')}/sessions", timeout=5)
+        except requests.RequestException:
+            return None
+        if response.status_code >= 400:
+            return None
+        try:
+            sessions = response.json().get("value", [])
+        except ValueError:
+            return None
+        if not sessions:
+            return None
+        session_id = sessions[0].get("id") or sessions[0].get("sessionId")
+        return cls(endpoint, session_id) if session_id else None
+
+    # Переход по URL
+    def navigate(self, url: str) -> None:
+        self._request("POST", f"/session/{self.session_id}/url", {"url": url})
+
+    # Список открытых вкладок
+    def window_handles(self) -> list[str]:
+        return self._request("GET", f"/session/{self.session_id}/window/handles") or []
+
+    # Текущая вкладка
+    def current_window(self) -> str | None:
+        return self._request("GET", f"/session/{self.session_id}/window")
+
+    # Переключение на вкладку
+    def switch_window(self, handle: str) -> None:
+        self._request("POST", f"/session/{self.session_id}/window", {"handle": handle})
+
+    # Закрытие текущей вкладки
+    def close_window(self) -> list[str]:
+        return self._request("DELETE", f"/session/{self.session_id}/window") or []
+
+    # Открытие новой вкладки и переключение на неё
+    def open_new_tab(self) -> str:
+        handles_before = set(self.window_handles())
+        self.execute("window.open('about:blank', '_blank');")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            new_handles = [h for h in self.window_handles() if h not in handles_before]
+            if new_handles:
+                self.switch_window(new_handles[-1])
+                return new_handles[-1]
+            time.sleep(0.1)
+        raise WebDriverError("Firefox did not create a new tab")
+
+    # Синхронный JS в контексте страницы
+    def execute(self, script: str, args: list | None = None):
+        return self._request(
+            "POST",
+            f"/session/{self.session_id}/execute/sync",
+            {"script": script, "args": args or []},
+        )
+
+    # Асинхронный JS в контексте страницы
+    def execute_async(self, script: str, args: list | None = None):
+        return self._request(
+            "POST",
+            f"/session/{self.session_id}/execute/async",
+            {"script": script, "args": args or []},
+        )
+
+    # Таймаут выполнения JS
+    def set_script_timeout(self, seconds: int) -> None:
+        self._request("POST", f"/session/{self.session_id}/timeouts", {"script": seconds * 1000})
+
+    # Cookies текущей сессии
+    def get_cookies(self) -> list[dict]:
+        return self._request("GET", f"/session/{self.session_id}/cookie") or []
+
+    # Закрытие клиента без завершения сессии Firefox
+    def close(self) -> None:
+        pass
+
+
+# === Пример ===
+# from vk_downloader.browser.webdriver_client import FirefoxRemoteSession
+# browser = FirefoxRemoteSession.from_existing("http://127.0.0.1:4444")
+# browser.navigate("https://vkvideo.ru")
