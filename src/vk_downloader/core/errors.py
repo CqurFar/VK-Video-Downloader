@@ -57,6 +57,14 @@ class PlaylistExtractionError(VKDownloadError):
     """Не удалось извлечь ссылки со страницы плейлиста (пусто/приватно)."""
 
 
+class InvalidURLError(VKDownloadError):
+    """Входная ссылка не является допустимым VK video URL (trust boundary)."""
+
+
+class MultiPeriodNotSupportedError(VKDownloadError):
+    """Манифест DASH содержит несколько Period — плоская модель их не поддерживает."""
+
+
 class FFmpegNotFoundError(VKDownloadError):
     """ffmpeg не найден ни в packages/, ни в PATH."""
 

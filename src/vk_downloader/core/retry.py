@@ -9,6 +9,7 @@ from vk_downloader.core.errors import (
     FFmpegNotFoundError,
     FirefoxProfileNotFoundError,
     GeckodriverNotFoundError,
+    InvalidURLError,
     PlaylistExtractionError,
     QualityNotAvailableError,
 )
@@ -34,6 +35,7 @@ NON_RETRYABLE_VK: tuple[type[BaseException], ...] = (
     GeckodriverNotFoundError,
     PlaylistExtractionError,
     FFmpegMergeError,
+    InvalidURLError,
 )
 
 

@@ -11,6 +11,7 @@ from vk_downloader.browser.media_browser import VKMediaBrowser
 from vk_downloader.core import urlutils as _urlutils
 from vk_downloader.core.errors import (
     FirefoxProfileNotFoundError,
+    InvalidURLError,
     MPDNotFoundError,
     QualityNotAvailableError,
 )
@@ -88,6 +89,11 @@ class VKMediaDownloader:
     ) -> str:
         self.console.write("")
         self.console.write("Opening VK embed...")
+        try:
+            url = _urlutils.validate_input_url(url)
+        except ValueError as exc:
+            self.console.status(str(exc), ok=False)
+            raise InvalidURLError(str(exc)) from exc
         self.console.write(f"Source Link: {url}")
         data = await self.browser_helper.get_mpd(browser, url)
         # Название становится известно только после загрузки страницы

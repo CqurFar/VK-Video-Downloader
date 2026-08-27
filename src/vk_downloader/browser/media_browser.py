@@ -19,7 +19,7 @@ from vk_downloader.core.errors import (
     WebDriverError,
 )
 from vk_downloader.core.session import MediaSession
-from vk_downloader.core.urlutils import redact_url
+from vk_downloader.core.urlutils import is_vk_cdn, is_vk_trusted, redact_url
 from vk_downloader.settings import Config
 from vk_downloader.ui.console import Console
 
@@ -640,8 +640,10 @@ class VKMediaBrowser:
                 return candidate, text
         return None
 
-    # Похоже ли URL на MPD-манифест VK CDN
+    # Похоже ли URL на MPD-манифест VK и находится ли он в доверенном хосте
     def _is_candidate(self, url: str) -> bool:
+        if not is_vk_trusted(url):
+            return False
         hostname = urlparse(url).hostname or ""
         return bool(self.MPD_URL_PATTERN.search(url) or self.CDN_PATTERN.match(hostname))
 
@@ -719,6 +721,9 @@ class VKMediaBrowser:
             if kind in found:
                 continue
             for resource_url in resources:
+                # Доверяем только сегментам с хостов CDN VK
+                if not is_vk_cdn(resource_url):
+                    continue
                 if pattern.search(resource_url):
                     found[kind] = resource_url
                     break

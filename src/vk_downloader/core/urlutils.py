@@ -28,6 +28,52 @@ _SIGNED_PARAM_RE = re.compile(
 
 _SIGNED_KEYS = ("token", "sig", "hash", "extra", "expires", "exp", "hdnts", "src", "hd", "uid")
 
+# Доверенные хосты VK: входные ссылки и MPD допускаются только с них
+VK_HOSTS = frozenset({"vk.com", "vkvideo.ru", "vk.ru"})
+# CDN VK: классический vkvdNN.okcdn.ru и зеркала *.vkuser.net
+VK_CDN_PATTERN = re.compile(
+    r"^(?:vkvd\d+\.okcdn\.ru|(?:[\w-]+\.)?vkuser\.net)$",
+    re.I,
+)
+
+
+def is_vk_host(url: str) -> bool:
+    """Ссылка ведёт на один из официальных доменов VK по https."""
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.netloc or "").lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host in VK_HOSTS
+
+
+def is_vk_cdn(url: str) -> bool:
+    """URL указывает на CDN VK (okcdn/vkuser)."""
+    if not url:
+        return False
+    host = (urlparse(url).netloc or "").lower().split(":")[0]
+    return bool(VK_CDN_PATTERN.match(host))
+
+
+def is_vk_trusted(url: str) -> bool:
+    """Любой доверенный хост VK: сайт либо CDN."""
+    return is_vk_host(url) or is_vk_cdn(url)
+
+
+def validate_input_url(url: str) -> str:
+    """Нормализация ссылки и жёсткая проверка, что это VK.
+
+    Проверяем хост исходной ссылки ДО нормализации: ``normalize_url`` сам
+    подставляет хост ``vkvideo.ru``, поэтому валидация после него всегда проходила
+    бы. Посторонние хосты отбрасываются до любого обращения к браузеру/сети.
+    """
+    if not is_vk_host(url):
+        raise ValueError(f"Not a VK video URL: {url}")
+    return normalize_url(url)
+
 
 def redact_mpd(text: str) -> str:
     """Маскирование signed URL в debug-дампах mpd (token/sig/hashes)."""
