@@ -160,9 +160,7 @@ class VKMediaDownloader:
             data["mpd_url"],
             url,
         )
-        cookies = "; ".join(f"{c.get('name')}={c.get('value')}" for c in filtered)
-        if cookies:
-            headers["Cookie"] = cookies
+        cookies = _urlutils.build_cookie_jar(filtered)
 
         temp_dir = self.config.paths.output_dir / self.config.paths.temp_name
         await asyncio.to_thread(lambda: temp_dir.mkdir(parents=True, exist_ok=True))
@@ -192,6 +190,7 @@ class VKMediaDownloader:
                     video_tmp,
                     label,
                     temp_dir,
+                    cookies,
                 )
             if audio:
                 label = f"Audio Track [{audio['id']}]"
@@ -204,6 +203,7 @@ class VKMediaDownloader:
                     audio_tmp,
                     label,
                     temp_dir,
+                    cookies,
                 )
             self.console.write(f"Merged: {final.name}")
             await asyncio.to_thread(

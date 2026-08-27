@@ -19,7 +19,9 @@ def test_short_label_direct():
 
 
 def test_redact_mpd_direct():
-    raw = '<BaseURL>https://cdn.example.com/seg.m4s?token=abc123&amp;sig=deadbeef&extra=xyz</BaseURL>'
+    raw = (
+        "<BaseURL>https://cdn.example.com/seg.m4s?token=abc123&amp;sig=deadbeef&extra=xyz</BaseURL>"
+    )
     redacted = urlutils.redact_mpd(raw)
     assert "abc123" not in redacted
     assert "token=***" in redacted
@@ -39,6 +41,39 @@ def test_filter_cookies_direct():
     # без allowed hosts — возвращаем все именованные
     filtered2 = urlutils.filter_cookies(cookies)
     assert len(filtered2) == 2
+
+
+def test_filter_cookies_path_scope():
+    # path-scoped cookie не должен уходить на чужой путь запроса
+    cookies = [
+        {"name": "a", "value": "1", "domain": "vkvideo.ru", "path": "/secret"},
+        {"name": "b", "value": "2", "domain": "vkvideo.ru", "path": "/"},
+    ]
+    # запрос к /video — cookie /secret не подходит, / подходит
+    filtered = urlutils.filter_cookies(cookies, "https://vkvideo.ru/video/x.mpd")
+    names = {c["name"] for c in filtered}
+    assert "a" not in names
+    assert "b" in names
+    # запрос к /secret — оба подходят
+    filtered2 = urlutils.filter_cookies(cookies, "https://vkvideo.ru/secret/x")
+    assert {c["name"] for c in filtered2} == {"a", "b"}
+
+
+def test_build_cookie_jar_applies_domain():
+    import requests
+
+    jar = urlutils.build_cookie_jar(
+        [
+            {"name": "a", "value": "1", "domain": "vk.com", "path": "/"},
+            {"name": "b", "value": "2", "domain": "cdn.other.com", "path": "/"},
+        ]
+    )
+    assert isinstance(jar, requests.cookies.RequestsCookieJar)
+    # cookie для vk.com не отдаётся на чужой домен при реальном запросе
+    req = requests.Request("GET", "https://vk.com/x", cookies=jar).prepare()
+    cookie_header = req.headers.get("Cookie", "")
+    assert "a=1" in cookie_header
+    assert "b=2" not in cookie_header
 
 
 def test_normalize_url_direct():

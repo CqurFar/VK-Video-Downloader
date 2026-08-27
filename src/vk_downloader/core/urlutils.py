@@ -99,14 +99,29 @@ def is_signed_url(url: str) -> bool:
     return bool(_SIGNED_PARAM_RE.search(url or ""))
 
 
+def _path_matches(cookie_path: str, request_path: str) -> bool:
+    """RFC6265 §5.1.4: cookie path — префикс пути запроса (до следующего /)."""
+    if not cookie_path or cookie_path == "/":
+        return True
+    if not request_path.startswith(cookie_path):
+        return False
+    return len(request_path) == len(cookie_path) or request_path[len(cookie_path)] == "/"
+
+
 def filter_cookies(
     cookies: list[dict],
     *urls: str | None,
 ) -> list[dict]:
-    """Фильтрация cookies по domain/path — не шлём лишние session cookies на CDN."""
+    """Фильтрация cookies по domain/path — не шлём лишние session cookies на CDN.
+
+    Cookie попадает в выдачу, только если его domain совпадает с одним из
+    хостов запроса И его path является префиксом пути хотя бы одного запроса.
+    Это закрывает утечку path-scoped cookies на чужие пути/хосты.
+    """
     if not cookies:
         return []
     allowed_hosts: set[str] = set()
+    allowed_paths: list[str] = []
     for u in urls:
         if not u:
             continue
@@ -114,6 +129,7 @@ def filter_cookies(
             p = urlparse(u)
             if p.netloc:
                 allowed_hosts.add(p.netloc.lower().split(":")[0])
+                allowed_paths.append(p.path or "/")
         except Exception:
             continue
     if not allowed_hosts:
@@ -127,8 +143,39 @@ def filter_cookies(
         domain = (c.get("domain") or "").lstrip(".").lower()
         if domain and not any(h == domain or h.endswith("." + domain) for h in allowed_hosts):
             continue
+        cookie_path = c.get("path") or "/"
+        if not any(_path_matches(cookie_path, rp) for rp in allowed_paths):
+            continue
         filtered.append(c)
     return filtered
+
+
+def build_cookie_jar(cookies: list[dict]):
+    """Сборка RequestsCookieJar из браузерных cookies с учётом domain/path/secure/expiry.
+
+    Использование jar в ``requests.get(url, cookies=jar)`` заставляет Requests
+    самостоятельно применять корректную cookie-политику (domain + path + secure)
+    к каждому конкретному URL вместо ручной склейки заголовка Cookie.
+    """
+    import requests
+
+    jar = requests.cookies.RequestsCookieJar()
+    for c in cookies:
+        name = c.get("name")
+        if not name:
+            continue
+        try:
+            jar.set(
+                name,
+                c.get("value", ""),
+                domain=c.get("domain") or None,
+                path=c.get("path") or "/",
+                secure=bool(c.get("secure")),
+                expires=c.get("expiry"),
+            )
+        except Exception:
+            continue
+    return jar
 
 
 def normalize_url(url: str) -> str:

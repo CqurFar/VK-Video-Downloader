@@ -90,7 +90,12 @@ class DashDownloader:
 
     # Скачивание одного ресурса с повторными попытками и атомарной заменой
     def _download_resource(
-        self, url: str, headers: dict[str, str], output: Path, label: str
+        self,
+        url: str,
+        headers: dict[str, str],
+        output: Path,
+        label: str,
+        cookies: "requests.cookies.RequestsCookieJar | None" = None,
     ) -> int:
         target = Path(FSPaths.long(output))
         tmp = Path(FSPaths.long(output.with_name(output.name + ".tmp")))
@@ -127,18 +132,26 @@ class DashDownloader:
         headers: dict[str, str],
         output: Path,
         label: str,
+        cookies: "requests.cookies.RequestsCookieJar | None" = None,
     ) -> None:
         url = (track.get("url") or "").strip()
         parsed = urlparse(url)
         if not (parsed.scheme and parsed.netloc):
             raise RuntimeError(f"{label}: no SegmentTemplate and no downloadable BaseURL")
         self.console.write(f"{label} single-file mode")
-        total = await asyncio.to_thread(self._download_with_progress, url, headers, output, label)
+        total = await asyncio.to_thread(
+            self._download_with_progress, url, headers, output, label, cookies
+        )
         self.console.write(f"{label} downloaded: {total // (1024 * 1024)} MB")
 
     # Скачивание файла с прогресс-баром и повторными попытками
     def _download_with_progress(
-        self, url: str, headers: dict[str, str], output: Path, label: str
+        self,
+        url: str,
+        headers: dict[str, str],
+        output: Path,
+        label: str,
+        cookies: "requests.cookies.RequestsCookieJar | None" = None,
     ) -> int:
         target = Path(FSPaths.long(output))
         tmp = Path(FSPaths.long(output.with_name(output.name + ".tmp")))
@@ -149,7 +162,10 @@ class DashDownloader:
             tmp.unlink(missing_ok=True)
             try:
                 response = self._session(headers).get(
-                    url, timeout=self.config.download.request_timeout, stream=True
+                    url,
+                    timeout=self.config.download.request_timeout,
+                    stream=True,
+                    cookies=cookies,
                 )
                 if response.status_code != 200:
                     raise RuntimeError(f"HTTP {response.status_code}")
@@ -224,12 +240,13 @@ class DashDownloader:
         output: Path,
         label: str,
         temp_dir: Path,
+        cookies: "requests.cookies.RequestsCookieJar | None" = None,
     ) -> None:
         template = track.get("segment_template") or {}
         segments = track.get("segment_timeline") or []
         media = template.get("media")
         if not media or not segments:
-            await self._download_single_file(track, headers, output, label)
+            await self._download_single_file(track, headers, output, label, cookies)
             return
         parts_dir = temp_dir / f".{output.stem[:40]}.parts"
         parts_dir.mkdir(parents=True, exist_ok=True)
