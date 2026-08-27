@@ -14,7 +14,7 @@ def test_namespace_independent():
     xml = (
         '<?xml version="1.0"?>'
         '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static">'
-        "<Period><AdaptationSet mimeType=\"video/mp4\">"
+        '<Period><AdaptationSet mimeType="video/mp4">'
         '<Representation id="1" height="720" bandwidth="1000" codecs="avc1.64001e">'
         "<BaseURL>v.mp4</BaseURL></Representation>"
         "</AdaptationSet></Period></MPD>"
@@ -28,7 +28,7 @@ def test_nested_baseurl_inheritance():
     xml = (
         '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011">'
         "<BaseURL>https://cdn.example.com/</BaseURL>"
-        '<Period><BaseURL>period/</BaseURL>'
+        "<Period><BaseURL>period/</BaseURL>"
         '<AdaptationSet mimeType="video/mp4"><BaseURL>adapt/</BaseURL>'
         '<Representation id="1" height="360" bandwidth="500" codecs="avc1.64001e">'
         "<BaseURL>rep.mp4</BaseURL></Representation>"
@@ -64,7 +64,7 @@ def test_timeline_with_t():
         '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011"><Period>'
         '<AdaptationSet mimeType="video/mp4">'
         '<Representation id="1" height="360" bandwidth="500" codecs="avc1.64001e">'
-        '<BaseURL>https://cdn.example.com/</BaseURL>'
+        "<BaseURL>https://cdn.example.com/</BaseURL>"
         '<SegmentTemplate timescale="1000" media="seg-$Time$.m4s">'
         '<SegmentTimeline><S t="0" d="1000"/><S t="5000" d="1000"/></SegmentTimeline>'
         "</SegmentTemplate></Representation></AdaptationSet></Period></MPD>"
@@ -153,8 +153,10 @@ def test_skip_zero_duration():
     assert videos[0]["segment_timeline"][0]["duration"] == 1000
 
 
-# 10. несколько Period
-def test_multiple_periods():
+# 10. несколько Period — плоская модель их не поддерживает, явный отказ
+def test_multiple_periods_rejected():
+    from vk_downloader.core.errors import MultiPeriodNotSupportedError
+
     xml = (
         '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011">'
         '<Period><AdaptationSet mimeType="video/mp4">'
@@ -164,9 +166,8 @@ def test_multiple_periods():
         '<Representation id="2" height="720" bandwidth="1000" codecs="avc1.64001e"><BaseURL>https://cdn.example.com/p2.mp4</BaseURL></Representation>'
         "</AdaptationSet></Period></MPD>"
     )
-    videos, _ = parse(xml)
-    assert len(videos) == 2
-    assert {v["height"] for v in videos} == {360, 720}
+    with pytest.raises(MultiPeriodNotSupportedError):
+        parse(xml)
 
 
 # 11. duplicate representations — dedupe

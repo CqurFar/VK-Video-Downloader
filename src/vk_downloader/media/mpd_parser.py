@@ -3,6 +3,8 @@ import logging
 import xml.etree.ElementTree as ElementTree
 from urllib.parse import urljoin
 
+from vk_downloader.core.errors import MultiPeriodNotSupportedError
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +34,11 @@ class MPDParser:
         mpd_base = cls.direct_base_url(root)
         root_base = urljoin(mpd_url, mpd_base) if mpd_base else mpd_url
         periods = cls.children_by_name(root, "Period")
+        if len(periods) > 1:
+            raise MultiPeriodNotSupportedError(
+                f"MPD has {len(periods)} periods; multi-period manifests are not supported "
+                "(a single Period is expected for VK)"
+            )
         mpd_duration = cls.parse_iso8601_duration(root.attrib.get("mediaPresentationDuration"))
         for period in periods:
             period_duration = cls.parse_iso8601_duration(period.attrib.get("duration"))
