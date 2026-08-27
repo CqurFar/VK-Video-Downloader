@@ -25,6 +25,8 @@ class QualitySelector:
             ]
             if not videos:
                 raise QualityNotAvailableError("WebM requires VP8, VP9 or AV1 video")
+        elif output_format == "mkv":
+            videos = [t for t in videos if self._codec_is(t["codecs"], self.config.media.mkv_video)]
         elif compatible := [
             t for t in videos if self._codec_is(t["codecs"], self.config.media.mp4_video)
         ]:
@@ -50,6 +52,8 @@ class QualitySelector:
             ]
             if not audios:
                 raise QualityNotAvailableError("WebM requires Opus or Vorbis audio")
+        elif output_format == "mkv":
+            audios = [t for t in audios if self._codec_is(t["codecs"], self.config.media.mkv_audio)]
         elif output_format in {"mp4", "m4a"}:
             if compatible := [
                 t for t in audios if self._codec_is(t["codecs"], self.config.media.mp4_audio)

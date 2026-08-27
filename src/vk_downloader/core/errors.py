@@ -65,6 +65,10 @@ class MultiPeriodNotSupportedError(VKDownloadError):
     """Манифест DASH содержит несколько Period — плоская модель их не поддерживает."""
 
 
+class MPDTooLargeError(VKDownloadError):
+    """MPD декларирует аномально много сегментов (защита от DoS через огромный r)."""
+
+
 class FFmpegNotFoundError(VKDownloadError):
     """ffmpeg не найден ни в packages/, ни в PATH."""
 

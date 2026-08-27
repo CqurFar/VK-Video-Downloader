@@ -51,10 +51,13 @@ def is_vk_host(url: str) -> bool:
 
 
 def is_vk_cdn(url: str) -> bool:
-    """URL указывает на CDN VK (okcdn/vkuser)."""
+    """URL указывает на CDN VK (okcdn/vkuser) строго по https."""
     if not url:
         return False
-    host = (urlparse(url).netloc or "").lower().split(":")[0]
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.netloc or "").lower().split(":")[0]
     return bool(VK_CDN_PATTERN.match(host))
 
 

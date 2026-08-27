@@ -231,8 +231,8 @@ class VKMediaDownloader:
         index: int,
         folder: str | None,
     ) -> dict:
-        retries = self.config.download.auto_retries
-        delay = self.config.download.auto_retry_delay
+        retries = self.retry_policy.file_attempts
+        delay = self.retry_policy.base_delay
         status, reason = "ERROR", ""
         last_exc: BaseException | None = None
         for attempt in range(retries + 1):
@@ -606,7 +606,7 @@ class VKMediaDownloader:
     ) -> dict:
         status, reason = "ERROR", ""
         session = data
-        for attempt in range(self.config.download.auto_retries + 1):
+        for attempt in range(self.retry_policy.file_attempts + 1):
             try:
                 title = await self._materialize(
                     session, url, video_quality, audio_quality, output_format, index, folder
@@ -638,8 +638,8 @@ class VKMediaDownloader:
                         self.console.log(f"Refreshed MPD for retry {attempt + 1}")
                     except Exception as refresh_exc:
                         self.console.log(f"MPD refresh failed: {refresh_exc}")
-                if attempt < self.config.download.auto_retries:
-                    pause = self.config.download.auto_retry_delay * (attempt + 1)
+                if attempt < self.retry_policy.file_attempts:
+                    pause = self.retry_policy.base_delay * (attempt + 1)
                     if self.console.is_normal():
                         self.console.video_event("RETRY", f"attempt {attempt + 1}")
                     else:
@@ -721,7 +721,7 @@ class VKMediaDownloader:
 
     # Извлечение плейлиста с автоматическими повторами; None при неудаче
     async def _extract_with_retry(self, browser, playlist: str) -> tuple[str, list[str]] | None:
-        attempts = self.config.download.auto_retries
+        attempts = self.retry_policy.file_attempts
         for attempt in range(1, attempts + 1):
             try:
                 return await self.browser_helper.extract_playlist(browser, playlist)
@@ -732,7 +732,7 @@ class VKMediaDownloader:
                 self.console.status(f"Playlist attempt {attempt}/{attempts} failed", ok=False)
                 self.console.write(f"  Reason: {exc}")
                 if attempt < attempts:
-                    await asyncio.sleep(self.config.download.auto_retry_delay * attempt)
+                    await asyncio.sleep(self.retry_policy.base_delay * attempt)
         return None
 
     # Реальная проверка: запуск утилиты с --version/-version и чтение первой строки

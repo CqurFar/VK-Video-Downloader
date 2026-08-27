@@ -169,7 +169,10 @@ class DashDownloader:
             try:
                 response = self._session(headers).get(
                     url,
-                    timeout=self.config.download.request_timeout,
+                    timeout=(
+                        self.config.download.request_timeout,
+                        self.config.download.stall_timeout,
+                    ),
                     stream=True,
                     cookies=cookies,
                 )
@@ -177,12 +180,18 @@ class DashDownloader:
                     raise RuntimeError(f"HTTP {response.status_code}")
                 expected = int(response.headers.get("Content-Length") or 0)
                 last_paint = 0.0
+                last_data = time.monotonic()
                 with tmp.open("wb") as file:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if time.monotonic() - last_data > self.config.download.stall_timeout:
+                            raise RuntimeError(
+                                f"{label}: no data for {self.config.download.stall_timeout}s"
+                            )
                         if chunk:
                             file.write(chunk)
                             done += len(chunk)
-                            now = time.monotonic()
+                            last_data = time.monotonic()
+                            now = last_data
                             if expected and now - last_paint >= 0.3:
                                 last_paint = now
                                 self.console.progress(label, done, expected, started)

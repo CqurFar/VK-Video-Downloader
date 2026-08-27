@@ -3,7 +3,10 @@ import logging
 import xml.etree.ElementTree as ElementTree
 from urllib.parse import urljoin
 
-from vk_downloader.core.errors import MultiPeriodNotSupportedError
+from vk_downloader.core.errors import MPDTooLargeError, MultiPeriodNotSupportedError
+
+# Защита от DoS: аномально большой r= в SegmentTimeline материализует миллионы сегментов
+MAX_SEGMENTS = 100_000
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +178,11 @@ class MPDParser:
                     items, index, current_time, duration, timescale, period_duration
                 )
             )
+            if len(segments) + count > MAX_SEGMENTS:
+                raise MPDTooLargeError(
+                    f"MPD declares {len(segments) + count} segments (limit {MAX_SEGMENTS}); "
+                    "rejecting to avoid memory exhaustion"
+                )
             for _ in range(count):
                 segments.append(
                     {

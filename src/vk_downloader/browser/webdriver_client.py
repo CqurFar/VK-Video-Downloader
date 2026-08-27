@@ -1,9 +1,13 @@
 import contextlib
+import logging
 import time
 
 import requests
 
 from vk_downloader.core.errors import WebDriverError
+from vk_downloader.core.urlutils import is_vk_host
+
+logger = logging.getLogger(__name__)
 
 
 class FirefoxRemoteSession:
@@ -64,7 +68,9 @@ class FirefoxRemoteSession:
 
     # Подключение к уже существующей сессии geckodriver
     @classmethod
-    def from_existing(cls, endpoint: str) -> "FirefoxRemoteSession | None":
+    def from_existing(
+        cls, endpoint: str, preferred_id: str | None = None
+    ) -> "FirefoxRemoteSession | None":
         try:
             response = requests.get(f"{endpoint.rstrip('/')}/sessions", timeout=5)
         except requests.RequestException:
@@ -77,8 +83,56 @@ class FirefoxRemoteSession:
             return None
         if not sessions:
             return None
-        session_id = sessions[0].get("id") or sessions[0].get("sessionId")
-        return cls(endpoint, session_id) if session_id else None
+        chosen = cls._select_session(endpoint, sessions, preferred_id)
+        return cls(endpoint, chosen) if chosen else None
+
+    # Выбор подходящей сессии: явный id > firefox > VK-вкладка > первая
+    @classmethod
+    def _select_session(
+        cls, endpoint: str, sessions: list[dict], preferred_id: str | None
+    ) -> str | None:
+        def sid_of(session: dict) -> str | None:
+            return session.get("id") or session.get("sessionId")
+
+        def is_firefox(session: dict) -> bool:
+            caps = session.get("capabilities", {}) or {}
+            name = caps.get("browserName") or caps.get("alwaysMatch", {}).get("browserName")
+            return name == "firefox"
+
+        if preferred_id:
+            for session in sessions:
+                if sid_of(session) == preferred_id:
+                    return preferred_id
+        firefox = [s for s in sessions if is_firefox(s)]
+        candidates = firefox or sessions
+        if len(candidates) == 1:
+            return sid_of(candidates[0])
+        for session in candidates:
+            sid = sid_of(session)
+            if sid and cls._is_vk_url(endpoint, sid):
+                return sid
+        if len(candidates) > 1:
+            logger.warning(
+                "Multiple WebDriver sessions (%d); using first: %s",
+                len(candidates),
+                sid_of(candidates[0]),
+            )
+        return sid_of(candidates[0])
+
+    # Текущий URL вкладки сессии (None при ошибке)
+    @staticmethod
+    def _is_vk_url(endpoint: str, session_id: str) -> bool:
+        try:
+            response = requests.get(f"{endpoint.rstrip('/')}/session/{session_id}/url", timeout=3)
+        except requests.RequestException:
+            return False
+        if response.status_code >= 400:
+            return False
+        try:
+            url = response.json().get("value", "")
+        except ValueError:
+            return False
+        return bool(url) and is_vk_host(url)
 
     # Переход по URL
     def navigate(self, url: str) -> None:

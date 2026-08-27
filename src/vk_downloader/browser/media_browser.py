@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import re
 import shutil
 import subprocess
 import time
@@ -9,6 +8,14 @@ from urllib.parse import urlparse
 
 import requests
 
+from vk_downloader.browser.vk.constants import (
+    AUDIO_MEDIA_PATTERN,
+    AUDIO_SEGMENT_PATTERN,
+    CDN_PATTERN,
+    MPD_URL_PATTERN,
+    VIDEO_MEDIA_PATTERN,
+    VIDEO_SEGMENT_PATTERN,
+)
 from vk_downloader.browser.webdriver_client import FirefoxRemoteSession
 from vk_downloader.core.errors import (
     GeckodriverNotFoundError,
@@ -27,17 +34,13 @@ from vk_downloader.ui.console import Console
 class VKMediaBrowser:
     """ПОЛУЧЕНИЕ MPD И DASH-ТРАФИКА ЧЕРЕЗ ЗАПУЩЕННЫЙ FIREFOX"""
 
-    # Хосты CDNVK: классический vkvdNN.okcdn.ru и новые зеркала *.vkuser.net
-    # (например vk6-15.vkuser.net). Превью-хосты (iv./api.okcdn) не подходят.
-    CDN_PATTERN = re.compile(
-        r"^(?:vkvd\d+\.okcdn\.ru|(?:[\w-]+\.)?vkuser\.net)$",
-        re.I,
-    )
-    MPD_URL_PATTERN = re.compile(r"(?:\.mpd(?:$|[?#])|/manifest(?:[/?#]|$)|/mpd(?:[/?#]|$))", re.I)
-    VIDEO_SEGMENT_PATTERN = re.compile(r"(?:/fn/)?track\.v\.m4s(?:$|[?#])", re.I)
-    AUDIO_SEGMENT_PATTERN = re.compile(r"(?:/fn/)?track\.a\.m4s(?:$|[?#])", re.I)
-    VIDEO_MEDIA_PATTERN = re.compile(r"/fn/s\d+\.v\.m4s(?:$|[?#])", re.I)
-    AUDIO_MEDIA_PATTERN = re.compile(r"/fn/s\d+\.a\.m4s(?:$|[?#])", re.I)
+    # VK-специфичные паттерны вынесены в browser.vk.constants
+    CDN_PATTERN = CDN_PATTERN
+    MPD_URL_PATTERN = MPD_URL_PATTERN
+    VIDEO_SEGMENT_PATTERN = VIDEO_SEGMENT_PATTERN
+    AUDIO_SEGMENT_PATTERN = AUDIO_SEGMENT_PATTERN
+    VIDEO_MEDIA_PATTERN = VIDEO_MEDIA_PATTERN
+    AUDIO_MEDIA_PATTERN = AUDIO_MEDIA_PATTERN
 
     # Однократная активация плеера: play() медиа и кнопки Play во всём DOM включая Shadow DOM
     PLAYER_JS = """
@@ -168,7 +171,7 @@ class VKMediaBrowser:
             last = found.size;
             if (stable >= 4) {
                 const title = pick('[data-testid="video_playlist_side_block_title"] h1')
-                           || pick('[data-testid="breadcrumb-current"] [data-testid="breadcrumb-label"]');
+                               || pick('[data-testid="breadcrumb-current"] [data-testid="breadcrumb-label"]');
                 return done({title, urls: [...found.values()]});
             }
             setTimeout(tick, 500);
@@ -196,7 +199,9 @@ class VKMediaBrowser:
             )
         session = None
         try:
-            session = FirefoxRemoteSession.from_existing(endpoint)
+            session = FirefoxRemoteSession.from_existing(
+                endpoint, self.config.browser.session_id or None
+            )
         except Exception:
             session = None
         if session:
@@ -244,7 +249,9 @@ class VKMediaBrowser:
                     ) from exc
                 # geckodriver держит старую сессию: пробуем подключиться к ней
                 if "already started" in str(exc).lower():
-                    session = FirefoxRemoteSession.from_existing(endpoint)
+                    session = FirefoxRemoteSession.from_existing(
+                        endpoint, self.config.browser.session_id or None
+                    )
                     if session:
                         self.console.status("Successful connection (existing session)")
                         return session

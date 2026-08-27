@@ -62,6 +62,7 @@ class BrowserConfig:
         self.traffic_capture_seconds = 12  # минимальное время сбора трафика
         self.traffic_capture_timeout = 40  # максимальное время сбора трафика
         self.context_attempts = 3  # повторы при потере вкладки браузера
+        self.session_id = ""  # явный id WebDriver-сессии для from_existing (""=авто)
 
 
 class DownloadConfig:
@@ -72,6 +73,7 @@ class DownloadConfig:
         self.workers_min = 8
         self.retries = 3
         self.request_timeout = 15
+        self.stall_timeout = 30  # перезапуск, если сегмент не растёт за N сек
 
         self.max_passes = 3  # проходов по сегменту до "безнадёжных"
         self.rescue_delay = 5  # пауза перед спасательной фазой, сек
@@ -122,6 +124,9 @@ class MediaConfig:
         self.webm_audio = ("opus", "vorbis")
         self.mp4_video = ("avc1", "avc3", "hvc1", "hev1", "av01")
         self.mp4_audio = ("mp4a",)
+        # MKV допускает practically любые кодеки: не режем VP9/AV1 как для mp4
+        self.mkv_video = ("avc1", "avc3", "hvc1", "hev1", "av01", "vp8", "vp9", "vp09")
+        self.mkv_audio = ("mp4a", "aac", "opus", "vorbis", "flac", "mp3", "eac3", "ac-3", "ec-3")
 
         self.default_video = "best"
         self.default_audio = "best"

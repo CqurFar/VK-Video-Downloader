@@ -19,13 +19,18 @@ class MediaSession:
     mpd_text: str
     title: str
     user_agent: str
-    cookies: list[dict] = field(default_factory=list)
+    cookies: tuple[dict, ...] = field(default_factory=tuple)
     video_segment_url: str | None = None
     audio_segment_url: str | None = None
     video_segment_base: str | None = None
     audio_segment_base: str | None = None
     captured_at: float = field(default_factory=time.monotonic)
     ttl: float = 300.0  # подписанные CDN URL живут ~5 мин
+
+    def __post_init__(self) -> None:
+        # Гарантируем иммутабельность: внешний list не должен мутировать сессию
+        if not isinstance(self.cookies, tuple):
+            object.__setattr__(self, "cookies", tuple(self.cookies))
 
     @property
     def is_stale(self) -> bool:
@@ -71,7 +76,7 @@ class MediaSession:
             mpd_text=data.get("mpd_text", ""),
             title=data.get("title", ""),
             user_agent=data.get("user_agent", ""),
-            cookies=list(data.get("cookies", [])),
+            cookies=tuple(data.get("cookies", [])),
             video_segment_url=data.get("video_segment_url"),
             audio_segment_url=data.get("audio_segment_url"),
             video_segment_base=data.get("video_segment_base"),

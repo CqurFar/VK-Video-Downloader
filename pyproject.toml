@@ -24,7 +24,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra -m 'not integration'"
+markers = [
+    "integration: end-to-end replay tests against a local CDN (need -m integration to run)",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vk_downloader"]

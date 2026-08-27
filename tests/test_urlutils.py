@@ -1,6 +1,5 @@
 """Прямые тесты вынесенных urlutils — без зависимости от God Object."""
 
-from pathlib import Path
 
 from vk_downloader.core import urlutils
 from vk_downloader.settings import Config
@@ -94,3 +93,21 @@ def test_free_disk_gb(tmp_path):
     gb = urlutils.free_disk_gb(tmp_path)
     assert gb > 0
     assert urlutils.free_disk_gb("/nonexistent/path/xyz") == 0.0 or isinstance(gb, float)
+
+
+def test_is_vk_cdn_requires_https():
+    # https CDN — OK (vkuser.net и vkvdN.okcdn.ru входят в паттерн)
+    assert urlutils.is_vk_cdn("https://vk6-15.vkuser.net/seg/1.m4s") is True
+    assert urlutils.is_vk_cdn("https://vkvd5.okcdn.ru/video/2.m4s") is True
+    # plain http — отклоняем (P1-9: только https)
+    assert urlutils.is_vk_cdn("http://vk6-15.vkuser.net/seg/1.m4s") is False
+    assert urlutils.is_vk_cdn("http://vkvd5.okcdn.ru/video/2.m4s") is False
+    # чужой домен
+    assert urlutils.is_vk_cdn("https://evil.example.com/seg.m4s") is False
+    assert urlutils.is_vk_cdn("") is False
+
+
+def test_is_vk_host_preserves_http_rejection():
+    assert urlutils.is_vk_host("https://vkvideo.ru/x") is True
+    assert urlutils.is_vk_host("http://vkvideo.ru/x") is False
+    assert urlutils.is_vk_host("https://evil.com/x") is False

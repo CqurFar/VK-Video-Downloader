@@ -17,7 +17,7 @@ CLI-загрузчик видео [VK Видео](https://vkvideo.ru) через
 
 ### 0) Python и uv
 
-Установите Python 3.13+ ([python.org/downloads](https://www.python.org/downloads/))
+Установите Python 3.11+ ([python.org/downloads](https://www.python.org/downloads/))
 и менеджер пакетов uv:
 
 ```powershell
