@@ -6,14 +6,16 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 from vk_downloader.browser.media_browser import VKMediaBrowser
+from vk_downloader.core import urlutils as _urlutils
 from vk_downloader.core.errors import (
     FirefoxProfileNotFoundError,
     MPDNotFoundError,
     QualityNotAvailableError,
 )
+from vk_downloader.core.quality import QualitySelector
+from vk_downloader.core.retry import RetryPolicy, is_retryable
 from vk_downloader.download.dash_downloader import DashDownloader
 from vk_downloader.media.ffmpeg_merger import FFmpegMerger
 from vk_downloader.media.mpd_parser import MPDParser
@@ -31,151 +33,46 @@ class VKMediaDownloader:
         self.browser_helper = VKMediaBrowser(config, self.console)
         self.downloader = DashDownloader(config, self.console)
         self.merger = FFmpegMerger(config, self.console)
+        self.quality = QualitySelector(config)
+        self.retry_policy = RetryPolicy.from_config(config)
 
-    # Безопасное имя файла из заголовка видео с обрезкой под лимит Windows
+    # Делегировано в core/urlutils и core/quality — оставлено для совместимости
     def safe_filename(self, name: str) -> str:
-        naming = self.config.naming
-        name = re.sub(r"\s+", " ", naming.safe_name_re.sub("_", name)).strip()
-        return name[: naming.max_name].rstrip(". ") or naming.fallback_name
+        return _urlutils.safe_filename(name, self.config)
 
-    # Короткая метка ссылки до разбора заголовка
     @staticmethod
     def _short_label(url: str) -> str:
-        match = re.search(r"[?&]id=(\d+)", url)
-        return f"VK-{match.group(1)}" if match else url[-45:]
+        return _urlutils.short_label(url)
 
-    # Маскирование signed URL в debug-дампах mpd (token/sig/hashes)
     @staticmethod
     def _redact_mpd(text: str) -> str:
-        # маскируем значения чувствительных query-параметров, оставляя ключ
-        # учитывает как & так и &amp; в XML
-        return re.sub(
-            r"((?:[?&]|&amp;)(?:token|sig2?|hash|extra|expires?|exp|hdnts|src|hd|uid)[^=&]*)=[^&\"'<>\\s]+",
-            r"\1=***",
-            text,
-            flags=re.I,
-        )
+        return _urlutils.redact_mpd(text)
 
-    # Фильтрация cookies по domain/path — не шлём лишние session cookies на CDN
     @staticmethod
     def _filter_cookies(
         cookies: list[dict],
         *urls: str | None,
     ) -> list[dict]:
-        if not cookies:
-            return []
-        allowed_hosts = set()
-        for u in urls:
-            if not u:
-                continue
-            try:
-                p = urlparse(u)
-                if p.netloc:
-                    allowed_hosts.add(p.netloc.lower().split(":")[0])
-            except Exception:
-                continue
-        if not allowed_hosts:
-            return [c for c in cookies if c.get("name")]
+        return _urlutils.filter_cookies(cookies, *urls)
 
-        filtered: list[dict] = []
-        for c in cookies:
-            name = c.get("name")
-            if not name:
-                continue
-            domain = (c.get("domain") or "").lstrip(".").lower()
-            if domain and not any(h == domain or h.endswith("." + domain) for h in allowed_hosts):
-                continue
-            filtered.append(c)
-        return filtered
-
-    # Сопоставление кодека трека с семейством по первому компоненту fourcc:
-    # подстрочный поиск не работает ("vp9" отсутствует в реальном "vp09.00.10.08")
     @staticmethod
     def _codec_is(track_codecs: str, families: tuple[str, ...]) -> bool:
-        fourcc = track_codecs.split(".")[0].strip().lower()
-        return fourcc in families
+        return _urlutils.codec_is(track_codecs, families)
 
-    # Выбор видео-трека: точное совпадение цели или лучший доступный
     def choose_video(self, videos: list[dict], target: int | str, output_format: str) -> dict:
-        if output_format == "webm":
-            videos = [
-                t for t in videos if self._codec_is(t["codecs"], self.config.media.webm_video)
-            ]
-            if not videos:
-                raise QualityNotAvailableError("WebM requires VP8, VP9 or AV1 video")
-        elif compatible := [
-            t for t in videos if self._codec_is(t["codecs"], self.config.media.mp4_video)
-        ]:
-            videos = compatible
-        videos = sorted(videos, key=lambda t: (t["height"], t["bandwidth"]))
-        if not videos:
-            raise QualityNotAvailableError("No video track available")
-        if target == "best":
-            return videos[-1]
-        if isinstance(target, int):
-            exact = [t for t in videos if t["height"] == target]
-            if exact:
-                return exact[-1]
-            greater = [t for t in videos if t["height"] >= target]
-            return min(greater, key=lambda t: t["height"]) if greater else videos[-1]
-        raise QualityNotAvailableError(f"Invalid video quality: {target}")
+        return self.quality.choose_video(videos, target, output_format)
 
-    # Выбор аудио-трека: точное совпадение цели или лучший доступный
     def choose_audio(self, audios: list[dict], target: int | str, output_format: str) -> dict:
-        if output_format == "webm":
-            audios = [
-                t for t in audios if self._codec_is(t["codecs"], self.config.media.webm_audio)
-            ]
-            if not audios:
-                raise QualityNotAvailableError("WebM requires Opus or Vorbis audio")
-        elif output_format in {"mp4", "m4a"}:
-            if compatible := [
-                t for t in audios if self._codec_is(t["codecs"], self.config.media.mp4_audio)
-            ]:
-                audios = compatible
-        audios = sorted(audios, key=lambda t: t["bandwidth"])
-        if not audios:
-            raise QualityNotAvailableError("No audio track available")
-        if target == "best":
-            return audios[-1]
-        if isinstance(target, int):
-            exact = [t for t in audios if t["bandwidth"] // 1000 == target]
-            if exact:
-                return exact[-1]
-            value = target * 1000
-            greater = [t for t in audios if t["bandwidth"] >= value]
-            return min(greater, key=lambda t: t["bandwidth"]) if greater else audios[-1]
-        raise QualityNotAvailableError(f"Invalid audio quality: {target}")
+        return self.quality.choose_audio(audios, target, output_format)
 
-    # Разрешение качества трека; None означает "дорожка не нужна"
     def resolve_quality(
         self, kind: str, tracks: list[dict], requested: str, output_format: str
     ) -> dict | None:
-        if requested.lower() == "none":
-            return None
-        return self._pick(kind, tracks, requested)
+        return self.quality.resolve_quality(kind, tracks, requested, output_format)
 
-    # Разбор значения качества без меню
     @staticmethod
     def _pick(kind: str, tracks: list[dict], requested: str) -> dict:
-        if kind == "video":
-            tracks = sorted(tracks, key=lambda t: (t["height"], t["bandwidth"]))
-            field_name, scale = "height", 1
-        else:
-            tracks = sorted(tracks, key=lambda t: t["bandwidth"])
-            field_name, scale = "bandwidth", 1000
-        if requested.lower() != "best":
-            try:
-                value = int(requested) * scale
-            except ValueError as exc:
-                raise QualityNotAvailableError(f"Invalid {kind} quality: {requested}") from exc
-            exact = [t for t in tracks if t[field_name] == value]
-            if exact:
-                return exact[-1]
-            greater = [t for t in tracks if t[field_name] >= value]
-            if greater:
-                return min(greater, key=lambda t: t[field_name])
-        return tracks[-1]
+        return QualitySelector._pick(kind, tracks, requested)
 
     # Обработка одной ссылки от MPD до готового файла; возвращает название
     async def process_one(
@@ -328,6 +225,7 @@ class VKMediaDownloader:
         retries = self.config.download.auto_retries
         delay = self.config.download.auto_retry_delay
         status, reason = "ERROR", ""
+        last_exc: BaseException | None = None
         for attempt in range(retries + 1):
             try:
                 self.console.scan_start()
@@ -350,13 +248,16 @@ class VKMediaDownloader:
                 }
             except MPDNotFoundError as exc:
                 status, reason = "SKIP", str(exc)
+                last_exc = exc
             except Exception as exc:
                 status, reason = "ERROR", str(exc)
+                last_exc = exc
+            # Программистские/детерминированные ошибки не ретраим
+            if last_exc is not None and not is_retryable(last_exc):
+                break
             if attempt < retries:
                 pause = delay * (attempt + 1)
                 if self.console.is_normal():
-                    # RETRY фиксируется отдельной строкой, следующая попытка
-                    # начинает новую live-строку с нулевого процента
                     self.console.video_event("RETRY", f"attempt {attempt + 1}/{retries}")
                 else:
                     self.console.item_status(
@@ -440,14 +341,9 @@ class VKMediaDownloader:
         self.config.paths.failed_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.console.write(f"Failed links saved: {self.config.paths.failed_file}")
 
-    # Любая ссылка VK приводится к каноническому embed-виду с oid/id:
-    # манифест с хешами CDN отдаётся плееру именно на такой странице
     @staticmethod
     def normalize_url(url: str) -> str:
-        match = re.search(r"/video(-?\d+)_(\d+)", urlparse(url).path)
-        if not match:
-            return url
-        return f"https://vkvideo.ru/video_ext.php?oid={match.group(1)}&id={match.group(2)}"
+        return _urlutils.normalize_url(url)
 
     # Разбор --format: "mkv" | "aac"(только аудио) | "mkv+aac"(контейнер + аудио)
     # "acc" принимается как алиас правильного "aac"
@@ -707,6 +603,8 @@ class VKMediaDownloader:
                 }
             except Exception as exc:
                 status, reason = "ERROR", str(exc)
+                if not is_retryable(exc):
+                    break
                 if attempt < self.config.download.auto_retries:
                     pause = self.config.download.auto_retry_delay * (attempt + 1)
                     if self.console.is_normal():
@@ -795,6 +693,9 @@ class VKMediaDownloader:
             try:
                 return await self.browser_helper.extract_playlist(browser, playlist)
             except Exception as exc:
+                if not is_retryable(exc):
+                    self.console.status(f"Playlist failed (non-retryable): {exc}", ok=False)
+                    return None
                 self.console.status(f"Playlist attempt {attempt}/{attempts} failed", ok=False)
                 self.console.write(f"  Reason: {exc}")
                 if attempt < attempts:
@@ -830,6 +731,7 @@ class VKMediaDownloader:
         ffmpeg_version = self._probe_version([ffmpeg, "-version"]) if ffmpeg else None
         ffmpeg_ok = bool(ffmpeg and ffmpeg_version)
         free_gb = self._free_ram_gb()
+        free_disk = self._free_disk_gb(self.config.paths.output_dir)
         if self.console.is_normal():
             self.console.normal_header("ENVIROMENT")
             self.console.status_line("Firefox profile", profile_ok)
@@ -860,10 +762,16 @@ class VKMediaDownloader:
                 f"Low free memory: {free_gb:.1f} GB — Firefox may discard tabs",
                 ok=False,
             )
+        if 0 < free_disk < 1:
+            self.console.status(
+                f"Low free disk: {free_disk:.1f} GB on {self.config.paths.output_dir}",
+                ok=False,
+            )
 
-    # Свободная ОЗУ в ГБ (0 если не удалось определить)
+    # Свободная ОЗУ в ГБ (0 если не удалось определить) — кроссплатформенно
     @staticmethod
     def _free_ram_gb() -> float:
+        # Windows
         try:
             import ctypes
 
@@ -882,8 +790,37 @@ class VKMediaDownloader:
 
             status = MemoryStatusEx()
             status.dwLength = ctypes.sizeof(MemoryStatusEx)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):  # type: ignore[attr-defined]
                 return status.ullAvailPhys / 1024**3
+        except Exception:
+            pass
+        # Linux: /proc/meminfo
+        try:
+            with open("/proc/meminfo", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        kb = int(line.split()[1])
+                        return kb / 1024**2
+                    if line.startswith("MemFree:"):
+                        kb = int(line.split()[1])
+                        return kb / 1024**2
+        except Exception:
+            pass
+        # macOS / generic: psutil if available
+        try:
+            import psutil  # type: ignore[import-not-found]
+
+            return psutil.virtual_memory().available / 1024**3
+        except Exception:
+            pass
+        return 0.0
+
+    # Свободное место на диске в ГБ для указанного пути
+    @staticmethod
+    def _free_disk_gb(path: Path | str = ".") -> float:
+        try:
+            free = shutil.disk_usage(str(path)).free
+            return free / 1024**3
         except Exception:
             pass
         return 0.0

@@ -28,7 +28,6 @@ BANNER = "\n" + _ART + "\n" + _SUBTITLE.center(_ART_WIDTH) + "\n"
 _TITLE_WIDTH = 40
 # Вес стадии в агрегированном проценте видео
 _STAGE_WEIGHTS = {"video": 0.45, "audio": 0.45, "merge": 0.10}
-_SPIN_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
 class Console:
@@ -362,12 +361,13 @@ class Console:
         value = sum(_STAGE_WEIGHTS[s] * f for s, f in self._stages.items()) / max(weight_sum, 1e-9)
         return int(value * 100), True
 
-    # Перерисовка live-строки
+    # Перерисовка live-строки — спин берём из config.ui.spin_frames (единственный источник)
     def _redraw(self) -> None:
         title = self._video_title[:_TITLE_WIDTH].ljust(_TITLE_WIDTH)
         index = f"[{self._video_index:02d}] "
         if self._status == "MPD":
-            frame = _SPIN_FRAMES[self._frame_i % len(_SPIN_FRAMES)]
+            frames = self.config.ui.spin_frames
+            frame = frames[self._frame_i % len(frames)]
             body = f"{index}{title}  {frame:^5} - [MPD]"
         else:
             pct, _ = self._aggregated()
