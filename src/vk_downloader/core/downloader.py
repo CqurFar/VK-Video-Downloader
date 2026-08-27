@@ -906,6 +906,7 @@ class VKMediaDownloader:
                 self.config.apply_debug()
             if advanced or debug_mode:
                 self.config.ui.mode = "advanced"
+                self.console.mode = "advanced"
             else:
                 self.config.ui.mode = "normal"
                 self.console.mode = "normal"

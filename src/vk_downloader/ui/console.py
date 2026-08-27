@@ -106,7 +106,7 @@ class Console:
     def status_line(self, label: str, ok: bool, value: str = "") -> None:
         mark = "✓" if ok else "✗"
         suffix = f" {value}" if value else ""
-        self._always(f"* {label:<18}{mark}{suffix}")
+        self._always(f"* {label:<18} {mark}{suffix}")
 
     # Статус обработки файла: DONE / SKIP / ERROR / RETRY (advanced)
     def item_status(self, index: int, title: str, status: str, extra: str = "") -> None:
@@ -395,6 +395,10 @@ class Console:
         if not self.is_normal():
             return
         self.tick_stop()
+        # RETRY показываем без старого прогресса, чтобы 100% не вводил в заблуждение
+        if status == "RETRY":
+            self._stages = {}
+            self._status = ""
         title = self._video_title[:_TITLE_WIDTH].ljust(_TITLE_WIDTH)
         note = f" ({reason})" if reason else ""
         pct, has_pct = self._aggregated()
