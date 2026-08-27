@@ -1,13 +1,13 @@
-import time
 import shutil
-import threading
 import subprocess
+import threading
+import time
 from pathlib import Path
 
+from vk_downloader.core.errors import FFmpegMergeError, FFmpegNotFoundError
 from vk_downloader.settings import Config
 from vk_downloader.ui.console import Console
 from vk_downloader.ui.fs_paths import FSPaths
-from vk_downloader.core.errors import FFmpegMergeError, FFmpegNotFoundError
 
 
 class FFmpegMerger:

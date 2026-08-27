@@ -1,7 +1,7 @@
 """Точка входа CLI: ``uv run vk-dl url_01 url_02 --video best --audio best --format mkv``."""
 
-import sys
 import asyncio
+import sys
 
 from vk_downloader.core.downloader import VKMediaDownloader
 from vk_downloader.settings import Config

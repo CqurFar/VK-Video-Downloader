@@ -1,11 +1,10 @@
+import argparse
+import asyncio
 import re
-import sys
 import shlex
 import shutil
-import asyncio
-import argparse
 import subprocess
-
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,13 +14,12 @@ from vk_downloader.core.errors import (
     MPDNotFoundError,
     QualityNotAvailableError,
 )
-
+from vk_downloader.download.dash_downloader import DashDownloader
+from vk_downloader.media.ffmpeg_merger import FFmpegMerger
+from vk_downloader.media.mpd_parser import MPDParser
 from vk_downloader.settings import Config
 from vk_downloader.ui.console import Console
 from vk_downloader.ui.fs_paths import FSPaths
-from vk_downloader.media.mpd_parser import MPDParser
-from vk_downloader.media.ffmpeg_merger import FFmpegMerger
-from vk_downloader.download.dash_downloader import DashDownloader
 
 
 class VKMediaDownloader:

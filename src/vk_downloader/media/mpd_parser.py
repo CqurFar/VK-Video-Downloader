@@ -1,6 +1,6 @@
 import html
-from urllib.parse import urljoin
 import xml.etree.ElementTree as ElementTree
+from urllib.parse import urljoin
 
 
 class MPDParser:

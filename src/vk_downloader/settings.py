@@ -1,9 +1,9 @@
 """Конфигурация приложения: пути, браузер, загрузка, медиа, пакеты."""
 
 import os
+import random
 import re
 import string
-import random
 from pathlib import Path
 
 
@@ -49,19 +49,19 @@ class BrowserConfig:
     def __init__(self):
         self.name = "firefox"
 
-        self.marionette_port = 2828         # порт Marionette в Firefox
-        self.geckodriver_port = 4444        # HTTP-порт geckodriver
-        self.connect_timeout = 5            # ожидание поднятия geckodriver, сек
-        self.mpd_timeout = 10               # сетевой таймаут загрузки MPD, сек
-        self.mpd_collect_timeout = 30       # общее ожидание MPD-манифеста, сек
-        self.player_retry_delay = 2         # пауза между попытками запуска плеера
-        self.script_timeout = 30            # таймаут выполнения JS в браузере
+        self.marionette_port = 2828  # порт Marionette в Firefox
+        self.geckodriver_port = 4444  # HTTP-порт geckodriver
+        self.connect_timeout = 5  # ожидание поднятия geckodriver, сек
+        self.mpd_timeout = 10  # сетевой таймаут загрузки MPD, сек
+        self.mpd_collect_timeout = 30  # общее ожидание MPD-манифеста, сек
+        self.player_retry_delay = 2  # пауза между попытками запуска плеера
+        self.script_timeout = 30  # таймаут выполнения JS в браузере
         self.playlist_script_timeout = 120  # таймаут JS извлечения плейлиста
-        self.title_wait_seconds = 5         # ожидание появления названия видео
-        self.player_start_delay = 2         # пауза перед активацией плеера
-        self.traffic_capture_seconds = 12   # минимальное время сбора трафика
-        self.traffic_capture_timeout = 40   # максимальное время сбора трафика
-        self.context_attempts = 3           # повторы при потере вкладки браузера
+        self.title_wait_seconds = 5  # ожидание появления названия видео
+        self.player_start_delay = 2  # пауза перед активацией плеера
+        self.traffic_capture_seconds = 12  # минимальное время сбора трафика
+        self.traffic_capture_timeout = 40  # максимальное время сбора трафика
+        self.context_attempts = 3  # повторы при потере вкладки браузера
 
 
 class DownloadConfig:
@@ -73,16 +73,16 @@ class DownloadConfig:
         self.retries = 3
         self.request_timeout = 15
 
-        self.max_passes = 3                 # проходов по сегменту до "безнадёжных"
-        self.rescue_delay = 5               # пауза перед спасательной фазой, сек
-        self.rescue_passes = 2              # проходов в спасательной фазе
+        self.max_passes = 3  # проходов по сегменту до "безнадёжных"
+        self.rescue_delay = 5  # пауза перед спасательной фазой, сек
+        self.rescue_passes = 2  # проходов в спасательной фазе
 
-        self.tail_ratio = 0.9               # доля скачанного для заморозки workers
-        self.tail_min_segments = 100        # минимальный трек для заморозки
+        self.tail_ratio = 0.9  # доля скачанного для заморозки workers
+        self.tail_min_segments = 100  # минимальный трек для заморозки
 
-        self.auto_retries = 3               # авто-попыток на файл до ручного ретрая
-        self.auto_retry_delay = 3           # базовая пауза между авто-попытками
-        self.pipeline = False               # параллельный захват MPD при загрузке (--pipeline)
+        self.auto_retries = 3  # авто-попыток на файл до ручного ретрая
+        self.auto_retry_delay = 3  # базовая пауза между авто-попытками
+        self.pipeline = False  # параллельный захват MPD при загрузке (--pipeline)
 
         # Порог числа сегментов (начальные workers)
         self.worker_tiers = (
@@ -106,8 +106,8 @@ class BalanceConfig:
     """БАЛАНСИРОВЩИК WORKERS"""
 
     def __init__(self):
-        self.grow_after = 16                # успешных задач до роста числа worker
-        self.step = 8                       # шаг изменения числа worker
+        self.grow_after = 16  # успешных задач до роста числа worker
+        self.step = 8  # шаг изменения числа worker
 
 
 class MediaConfig:
@@ -150,7 +150,7 @@ class UIConfig:
         self.spin_interval = 0.1
         self.section_width = 55
         self.bar_width = 36
-        # normal — упрощённый вывод / advanced — подробный / флаг --debug - advanced + записили логов
+        # normal — упрощённый вывод; advanced — подробный; --debug — advanced + логи
         self.mode = "normal"
 
 

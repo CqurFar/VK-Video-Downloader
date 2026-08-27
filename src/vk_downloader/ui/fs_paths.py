@@ -1,9 +1,8 @@
 """Windows-специфика путей: длинные пути и скрытые атрибуты."""
 
-
-import os
-import ctypes
 import contextlib
+import ctypes
+import os
 
 
 class FSPaths:

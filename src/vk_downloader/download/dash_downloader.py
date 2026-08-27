@@ -1,22 +1,22 @@
-import os
-import time
-import shutil
 import asyncio
+import os
+import shutil
 import threading
-from pathlib import Path
+import time
 from collections import deque
-from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
 
+from vk_downloader.core.errors import SegmentDownloadError
+from vk_downloader.download.concurrency_gate import ConcurrencyGate
+from vk_downloader.download.worker_balancer import WorkerBalancer
 from vk_downloader.settings import Config
 from vk_downloader.ui.console import Console
 from vk_downloader.ui.fs_paths import FSPaths
-from vk_downloader.download.worker_balancer import WorkerBalancer
-from vk_downloader.core.errors import SegmentDownloadError
-from vk_downloader.download.concurrency_gate import ConcurrencyGate
 
 
 class DashDownloader:
