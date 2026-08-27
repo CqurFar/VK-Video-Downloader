@@ -177,8 +177,8 @@ class FFmpegMerger:
     ) -> None:
         ffmpeg = self.find_ffmpeg()
         duration = max(self.get_duration(video or audio), 0.0)
-        # Атомарный вывод: ffmpeg пишет в .tmp, затем replace
-        tmp_output = output.with_name(output.name + ".tmp")
+        # Атомарный вывод: tmp сохраняет расширение, чтобы ffmpeg выбрал формат
+        tmp_output = output.with_name(output.stem + ".tmp" + output.suffix)
         tmp_output.parent.mkdir(parents=True, exist_ok=True)
         command = self.build_command(
             ffmpeg, video, audio, tmp_output, output_format, video_track, audio_track
