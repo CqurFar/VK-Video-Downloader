@@ -13,6 +13,8 @@ import threading
 import time
 from pathlib import Path
 
+from vk_downloader.core.urlutils import redact_text
+
 _ART = r"""
 ██╗   ██╗  ██╗  ██╗  ██╗   ██╗  ██████╗
 ██║   ██║  ██║ ██╔╝  ██║   ██║  ██╔══██╗
@@ -72,10 +74,11 @@ class Console:
             print(message, flush=True)
         self.log(message)
 
-    # Запись в лог без вывода в консоль
+    # Запись в лог без вывода в консоль — всегда через redact (defense in depth)
     def log(self, message: str = "") -> None:
         if self._log:
-            self._log.write(f"{message}\n")
+            safe = redact_text(str(message))
+            self._log.write(f"{safe}\n")
             self._log.flush()
 
     # Заголовок секции вида ─────── MPD ─────── с отступом сверху

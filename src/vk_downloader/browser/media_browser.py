@@ -18,6 +18,8 @@ from vk_downloader.core.errors import (
     PlaylistExtractionError,
     WebDriverError,
 )
+from vk_downloader.core.session import MediaSession
+from vk_downloader.core.urlutils import redact_url
 from vk_downloader.settings import Config
 from vk_downloader.ui.console import Console
 
@@ -318,7 +320,7 @@ class VKMediaBrowser:
             self.own_geckodriver = False
 
     # Основной сценарий: открыть embed, получить MPD и DASH-трафик
-    async def get_mpd(self, browser: FirefoxRemoteSession, url: str) -> dict:
+    async def get_mpd(self, browser: FirefoxRemoteSession, url: str) -> MediaSession:
         parent_window = self._recover_context(browser)
         try:
             for attempt in range(1, self.config.browser.context_attempts + 1):
@@ -341,14 +343,18 @@ class VKMediaBrowser:
                         title = await self._read_title(browser)
                     segment_data = await self._capture_traffic(browser)
                     cookies = browser.get_cookies()
-                    return {
-                        "mpd_url": mpd_url,
-                        "mpd_text": mpd_text,
-                        "title": title,
-                        "user_agent": user_agent,
-                        "cookies": cookies,
-                        **segment_data,
-                    }
+                    return MediaSession(
+                        url=url,
+                        mpd_url=mpd_url,
+                        mpd_text=mpd_text,
+                        title=title,
+                        user_agent=user_agent,
+                        cookies=cookies,
+                        video_segment_url=segment_data.get("video_segment_url"),
+                        audio_segment_url=segment_data.get("audio_segment_url"),
+                        video_segment_base=segment_data.get("video_segment_base"),
+                        audio_segment_base=segment_data.get("audio_segment_base"),
+                    )
                 except MPDNotFoundError:
                     raise
                 except Exception as exc:
@@ -545,7 +551,7 @@ class VKMediaBrowser:
                 mpd_url, mpd_text = result
                 self.console.section("MPD")
                 self.console.write("*.mpd Status: Accepted")
-                self.console.write(f"*.mpd Link: {mpd_url}")
+                self.console.write(f"*.mpd Link: {redact_url(mpd_url)}")
                 return mpd_url, mpd_text
             await asyncio.sleep(0.5)
         return None, None
@@ -572,16 +578,16 @@ class VKMediaBrowser:
         segment_data = self._extract_segment_data(self._resource_entries(browser))
         self.console.write("")
         self.console.write(
-            "Detected video segment: " + str(segment_data.get("video_segment_url") or "-")
+            "Detected video segment: " + redact_url(segment_data.get("video_segment_url"))
         )
         self.console.write(
-            "Detected audio segment: " + str(segment_data.get("audio_segment_url") or "-")
+            "Detected audio segment: " + redact_url(segment_data.get("audio_segment_url"))
         )
         self.console.write(
-            "Detected video CDN base: " + str(segment_data.get("video_segment_base") or "-")
+            "Detected video CDN base: " + redact_url(segment_data.get("video_segment_base"))
         )
         self.console.write(
-            "Detected audio CDN base: " + str(segment_data.get("audio_segment_base") or "-")
+            "Detected audio CDN base: " + redact_url(segment_data.get("audio_segment_base"))
         )
         self.console.status("DASH traffic collected")
         return segment_data

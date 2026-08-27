@@ -37,7 +37,7 @@ def test_pipeline_producer_consumer_success(tmp_path):
     # mock browser get_mpd to return fake_data
     dl.browser_helper.get_mpd = AsyncMock(return_value=fake_data)
     # mock _download_with_retry to return DONE
-    async def fake_retry(data, url, vq, aq, fmt, idx, folder):
+    async def fake_retry(data, url, vq, aq, fmt, idx, folder, browser=None, **_kw):
         return {"index": idx, "url": url, "title": f"title{idx}", "folder": folder or "", "status": "DONE", "reason": ""}
 
     dl._download_with_retry = fake_retry
@@ -84,8 +84,7 @@ def test_pipeline_producer_error_becomes_outcome():
 
 
 def test_pipeline_stale_mpd_retry_uses_same_data(monkeypatch):
-    # Document current behavior: pipeline retry reuses same `data` without refresh
-    # This test captures the bug — after fix it should refresh MPD
+    # dict-сессия без browser — реюз старой data (backward compat)
     dl = _dl()
     dl.config.download.auto_retry_delay = 0
     dl.config.download.auto_retries = 1
@@ -106,8 +105,6 @@ def test_pipeline_stale_mpd_retry_uses_same_data(monkeypatch):
 
     dl._materialize = fake_mat
     outcomes = {}
-    # pipeline calls _download_with_retry which loops retries on same data (currently)
-    # We test _download_with_retry directly: it should retry same data (current behavior)
     import asyncio
 
     async def test_retry():
@@ -115,6 +112,54 @@ def test_pipeline_stale_mpd_retry_uses_same_data(monkeypatch):
         return res
 
     res = asyncio.run(test_retry())
-    # currently retries same data and succeeds on 2nd attempt → DONE, proving stale reuse
     assert res["status"] == "DONE"
     assert call_count["n"] == 2
+
+
+def test_pipeline_stale_mpd_refreshes_with_browser(monkeypatch):
+    # MediaSession + browser + auth-ошибка → должен рефрешить MPD
+    from vk_downloader.core.session import MediaSession
+
+    dl = _dl()
+    dl.config.download.auto_retry_delay = 0
+    dl.config.download.auto_retries = 1
+    session = MediaSession(
+        url="https://vkvideo.ru/video-1_1",
+        mpd_url="https://cdn/manifest.mpd",
+        mpd_text="<MPD></MPD>",
+        title="vid",
+        user_agent="UA",
+        cookies=[],
+        ttl=0,  # сразу stale
+    )
+    refreshed = MediaSession(
+        url="https://vkvideo.ru/video-1_1",
+        mpd_url="https://cdn/manifest2.mpd",
+        mpd_text="<MPD>new</MPD>",
+        title="vid2",
+        user_agent="UA",
+        cookies=[],
+    )
+    dl.browser_helper.get_mpd = AsyncMock(return_value=refreshed)
+    call_data = {}
+
+    async def fake_mat(data, url, vq, aq, fmt, idx, folder):
+        call_data["url"] = getattr(data, "mpd_url", data.get("mpd_url"))
+        if call_data.get("n", 0) == 0:
+            call_data["n"] = 1
+            raise RuntimeError("401 Unauthorized - token expired")
+        call_data["n"] = 2
+        return "ok"
+
+    dl._materialize = fake_mat
+    import asyncio
+
+    async def test_retry():
+        return await dl._download_with_retry(
+            session, "https://vkvideo.ru/video-1_1", "best", "best", "mkv", 1, None, browser=MagicMock()
+        )
+
+    res = asyncio.run(test_retry())
+    assert res["status"] == "DONE"
+    assert dl.browser_helper.get_mpd.call_count == 1
+    assert call_data["url"] == "https://cdn/manifest2.mpd"

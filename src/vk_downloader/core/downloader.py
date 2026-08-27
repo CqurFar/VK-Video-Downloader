@@ -16,6 +16,7 @@ from vk_downloader.core.errors import (
 )
 from vk_downloader.core.quality import QualitySelector
 from vk_downloader.core.retry import RetryPolicy, is_retryable
+from vk_downloader.core.session import MediaSession
 from vk_downloader.download.dash_downloader import DashDownloader
 from vk_downloader.media.ffmpeg_merger import FFmpegMerger
 from vk_downloader.media.mpd_parser import MPDParser
@@ -166,11 +167,13 @@ class VKMediaDownloader:
             self.console.section("DOWNLOAD")
             self.console.write("DASH Segment Download Mode")
             self.console.write(f"Workers: max {self.config.download.workers_max}")
+            v_base = data.get("video_segment_base")
+            a_base = data.get("audio_segment_base")
             self.console.write(
-                f"Video Segment Base: {data.get('video_segment_base') or 'fallback'}"
+                f"Video Segment Base: {_urlutils.redact_url(v_base) if v_base else 'fallback'}"
             )
             self.console.write(
-                f"Audio Segment Base: {data.get('audio_segment_base') or 'fallback'}"
+                f"Audio Segment Base: {_urlutils.redact_url(a_base) if a_base else 'fallback'}"
             )
             if video:
                 label = f"Video Track [{video['id']}]"
@@ -559,11 +562,18 @@ class VKMediaDownloader:
                 if item is None:
                     return
                 index, url, data = item
-                if data.get("status") == "ERROR":
+                if isinstance(data, dict) and data.get("status") == "ERROR":
                     outcome = data
                 else:
                     outcome = await self._download_with_retry(
-                        data, url, video_quality, audio_quality, output_format, index, folder
+                        data,
+                        url,
+                        video_quality,
+                        audio_quality,
+                        output_format,
+                        index,
+                        folder,
+                        browser=browser,
                     )
                 outcomes[(folder or "", index)] = outcome
                 if outcome["status"] == "DONE":
@@ -579,19 +589,21 @@ class VKMediaDownloader:
     # Материализация уже захваченных данных: парсинг -> качество -> download -> merge
     async def _download_with_retry(
         self,
-        data: dict,
+        data: dict | MediaSession,
         url: str,
         video_quality: str,
         audio_quality: str,
         output_format: str,
         index: int,
         folder: str | None,
+        browser=None,
     ) -> dict:
         status, reason = "ERROR", ""
+        session = data
         for attempt in range(self.config.download.auto_retries + 1):
             try:
                 title = await self._materialize(
-                    data, url, video_quality, audio_quality, output_format, index, folder
+                    session, url, video_quality, audio_quality, output_format, index, folder
                 )
                 return {
                     "index": index,
@@ -605,6 +617,21 @@ class VKMediaDownloader:
                 status, reason = "ERROR", str(exc)
                 if not is_retryable(exc):
                     break
+                # P0: stale session — рефрешим MPD/cookies/segment bases
+                should_refresh = False
+                if isinstance(session, MediaSession):
+                    should_refresh = session.refresh_needed(exc) or session.is_stale
+                elif isinstance(session, dict):
+                    msg = str(exc).lower()
+                    should_refresh = any(
+                        k in msg for k in ("401", "403", "expired", "signature", "token")
+                    )
+                if should_refresh and browser is not None:
+                    try:
+                        session = await self.browser_helper.get_mpd(browser, url)
+                        self.console.log(f"Refreshed MPD for retry {attempt + 1}")
+                    except Exception as refresh_exc:
+                        self.console.log(f"MPD refresh failed: {refresh_exc}")
                 if attempt < self.config.download.auto_retries:
                     pause = self.config.download.auto_retry_delay * (attempt + 1)
                     if self.console.is_normal():
