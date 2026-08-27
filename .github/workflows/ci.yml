@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      - name: Ruff lint
+        run: uv run ruff check src --output-format=github
+      - name: Ruff format check
+        run: uv run ruff format src --check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      - name: Run tests
+        run: uv run pytest
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: CLI smoke test
+        run: |
+          uv run vk-dl --help
+          uv run python - <<'EOF'
+          from vk_downloader.settings import Config
+          from vk_downloader.media.mpd_parser import MPDParser
+
+          xml = (
+              '<?xml version="1.0"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011" '
+              'type="static"><Period><AdaptationSet mimeType="video/mp4">'
+              '<Representation id="1" bandwidth="500" height="360" codecs="avc1.64001e" mimeType="video/mp4">'
+              '<BaseURL>seg.mp4</BaseURL></Representation></AdaptationSet>'
+              '<AdaptationSet mimeType="audio/mp4">'
+              '<Representation id="2" bandwidth="128000" codecs="mp4a.40.2" mimeType="audio/mp4">'
+              '<BaseURL>audio.mp4</BaseURL></Representation></AdaptationSet></Period></MPD>'
+          )
+          videos, audios = MPDParser.parse(xml, "https://example.com/manifest.mpd")
+          assert len(videos) == 1 and len(audios) == 1
+          assert videos[0]["height"] == 360
+          print("parser smoke OK")
+          EOF
