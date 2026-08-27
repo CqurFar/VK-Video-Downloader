@@ -1,10 +1,22 @@
 import html
+import logging
 import xml.etree.ElementTree as ElementTree
 from urllib.parse import urljoin
 
+logger = logging.getLogger(__name__)
+
 
 class MPDParser:
-    """РАЗБОР DASH-МАНИФЕСТА В СПИСКИ ВИДЕО И АУДИО ТРЕКОВ"""
+    """VK-specific DASH MPD parser: BaseURL chains, SegmentTemplate/Timeline, $Number$/$Time$.
+
+    Поддерживает диалект, который фактически отдаёт VK Video (имена с учётом
+    namespace, наследование BaseURL/SegmentTemplate, SegmentTimeline с r).
+    Не претендует на полный DASH — SegmentBase/SegmentList, ContentProtection
+    и другие редкие конструкции не покрыты.
+    """
+
+    # Совместимость: старое имяGeneric → VK-specific alias
+    VKMPDParser = None  # заполняется после определения класса
 
     # Разбор MPD XML: треки с учётом наследования BaseURL и SegmentTemplate
     @classmethod
@@ -189,6 +201,14 @@ class MPDParser:
                     return max(int(remaining // duration), 1)
             except Exception:
                 pass
+        logger.warning(
+            "r=-1 on last S without period duration: count unknown, emitting 1 segment "
+            "(t=%s d=%s timescale=%s period_duration=%r) — file may be truncated",
+            current_time,
+            duration,
+            timescale,
+            period_duration,
+        )
         return 1
 
     @staticmethod
@@ -252,6 +272,11 @@ class MPDParser:
             return default
 
 
+# VK-specific alias — явное имя для нового кода, старое MPDParser оставлено для совместимости
+VKMPDParser = MPDParser
+MPDParser.VKMPDParser = MPDParser  # type: ignore[attr-defined]
+
+
 # === Пример ===
-# from vk_downloader.media.mpd_parser import MPDParser
+# from vk_downloader.media.mpd_parser import MPDParser  # или VKMPDParser
 # videos, audios = MPDParser.parse(mpd_xml_text, mpd_url)
