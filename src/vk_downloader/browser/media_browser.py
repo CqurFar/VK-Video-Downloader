@@ -275,8 +275,10 @@ class VKMediaBrowser:
             user32.EnumWindows(enum_proc(callback), None)
             for hwnd in handles:
                 if user32.IsIconic(hwnd):
-                    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                user32.SetForegroundWindow(hwnd)
+                    # Показать без активации и без разворота на весь экран
+                    user32.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
+                # Не вызываем SetForegroundWindow, чтобы не уводить фокус
+                # с текущей страницы пользователя
             return bool(handles)
         except Exception:
             return False
@@ -377,7 +379,18 @@ class VKMediaBrowser:
             except Exception:
                 self._player_window = None
         if not self._player_window:
-            self._player_window = browser.open_new_tab()
+            # Отдельное окно меньше мешает вкладкам пользователя, чем новая вкладка
+            new_win = browser.open_new_window()
+            if new_win:
+                self._player_window = new_win
+                with contextlib.suppress(Exception):
+                    browser._request(
+                        "POST",
+                        f"/session/{browser.session_id}/window/rect",
+                        {"width": 1280, "height": 800, "x": 10, "y": 10},
+                    )
+            else:
+                self._player_window = browser.open_new_tab()
         browser.switch_window(self._player_window)
         browser.set_script_timeout(self.config.browser.script_timeout)
         browser.execute(

@@ -1,3 +1,4 @@
+import contextlib
 import time
 
 import requests
@@ -99,18 +100,53 @@ class FirefoxRemoteSession:
     def close_window(self) -> list[str]:
         return self._request("DELETE", f"/session/{self.session_id}/window") or []
 
-    # Открытие новой вкладки и переключение на неё
+    # Открытие новой вкладки (в фоне, не уводя фокус с текущей)
     def open_new_tab(self) -> str:
+        parent = None
+        with contextlib.suppress(Exception):
+            parent = self.current_window()
         handles_before = set(self.window_handles())
         self.execute("window.open('about:blank', '_blank');")
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             new_handles = [h for h in self.window_handles() if h not in handles_before]
             if new_handles:
-                self.switch_window(new_handles[-1])
-                return new_handles[-1]
+                new_handle = new_handles[-1]
+                # Держим фокус на родительской вкладке, чтобы не перекидывать пользователя
+                if parent and parent in self.window_handles():
+                    try:
+                        self.switch_window(parent)
+                    except Exception:
+                        self.switch_window(new_handle)
+                        return new_handle
+                else:
+                    self.switch_window(new_handle)
+                return new_handle
             time.sleep(0.1)
         raise WebDriverError("Firefox did not create a new tab")
+
+    # Попытка открыть отдельное окно для плеера (меньше мешает вкладкам)
+    def open_new_window(self) -> str | None:
+        try:
+            value = self._request(
+                "POST", f"/session/{self.session_id}/window/new", {"type": "window"}
+            )
+            handle = value.get("handle") if isinstance(value, dict) else None
+            if handle:
+                # Сразу возвращаем фокус родителю, если он есть
+                try:
+                    # value может содержать предыдущий handle, но переключимся назад
+                    handles = self.window_handles()
+                    # новый handle уже текущий, найдём старый
+                    old = [h for h in handles if h != handle]
+                    if old:
+                        self.switch_window(old[-1])
+                except Exception:
+                    pass
+                return handle
+        except Exception:
+            pass
+        return None
 
     # Синхронный JS в контексте страницы
     def execute(self, script: str, args: list | None = None):
