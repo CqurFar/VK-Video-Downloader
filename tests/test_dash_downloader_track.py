@@ -117,7 +117,7 @@ def test_download_track_resume_skips_cached_parts(tmp_path, monkeypatch):
 
     orig_download_segments = dl._download_segments
 
-    async def fake_segments(executor, segments, pending, base, media, headers, parts_dir, label):
+    async def fake_segments(executor, segments, pending, base, media, headers, parts_dir, label, cookies=None):
         called.append(list(pending))
         # simulate successful download by creating parts
         for idx in pending:
@@ -126,7 +126,7 @@ def test_download_track_resume_skips_cached_parts(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dl, "_download_segments", fake_segments)
     monkeypatch.setattr(
-        dl, "_download_resource", lambda u, h, o, l: (Path(o).write_bytes(b"init"), 4)[1]
+        dl, "_download_resource", lambda u, h, o, l, c=None: (Path(o).write_bytes(b"init"), 4)[1]
     )
     # pre-create init + 2 parts as cached
     # download_track will create parts_dir = temp_dir / .<stem>.parts, we intercept via fake_segments
@@ -153,13 +153,13 @@ def test_assemble_called_after_segments(tmp_path, monkeypatch):
     dl = _dl()
     track = _track_with_segments(2)
     out = tmp_path / "out.m4s"
-    monkeypatch.setattr(dl, "_download_resource", lambda u, h, o, l: Path(o).write_bytes(b"init"))
+    monkeypatch.setattr(dl, "_download_resource", lambda u, h, o, l, c=None: Path(o).write_bytes(b"init"))
     monkeypatch.setattr(dl, "_download_segments", lambda *a, **kw: asyncio.sleep(0))
 
     # need assemble to actually create file — patch to track call but still do real assemble? Keep real assemble
     # we let download_track run its assemble after mocked segments: it needs init + parts present
     # So mock _download_segments to create dummy parts
-    async def fake_seg(executor, segments, pending, base, media, headers, parts_dir, label):
+    async def fake_seg(executor, segments, pending, base, media, headers, parts_dir, label, cookies=None):
         Path(parts_dir / "00000000.init").write_bytes(b"INIT")
         for i in pending:
             Path(parts_dir / f"{i + 1:08d}.part").write_bytes(b"P")

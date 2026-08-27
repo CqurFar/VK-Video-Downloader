@@ -23,8 +23,12 @@ class MPDParser:
     # Разбор MPD XML: треки с учётом наследования BaseURL и SegmentTemplate
     @classmethod
     def parse(cls, xml_text: str, mpd_url: str) -> tuple[list[dict], list[dict]]:
+        stripped = xml_text.lstrip("\ufeff \t\r\n")
+        lowered = stripped[:1024].lower()
+        if "<!doctype" in lowered or "<!entity" in lowered:
+            raise RuntimeError("Invalid MPD: DTD/entity declarations are not allowed")
         try:
-            root = ElementTree.fromstring(xml_text.lstrip("\ufeff \t\r\n"))
+            root = ElementTree.fromstring(stripped)
         except ElementTree.ParseError as exc:
             snippet = xml_text.lstrip("\ufeff \t\r\n")[:80]
             raise RuntimeError(f"Invalid MPD: {exc}; body starts with: {snippet!r}") from exc

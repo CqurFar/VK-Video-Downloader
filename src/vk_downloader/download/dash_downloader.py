@@ -102,7 +102,10 @@ class DashDownloader:
         for attempt in range(1, self.config.download.retries + 1):
             try:
                 response = self._session(headers).get(
-                    url, timeout=self.config.download.request_timeout, stream=True
+                    url,
+                    timeout=self.config.download.request_timeout,
+                    stream=True,
+                    cookies=cookies,
                 )
                 if response.status_code != 200:
                     response.close()
@@ -114,6 +117,9 @@ class DashDownloader:
                             file.write(chunk)
                             total += len(chunk)
                 response.close()
+                if self._looks_like_html(tmp):
+                    tmp.unlink(missing_ok=True)
+                    raise RuntimeError("CDN returned an HTML error page instead of media")
                 if total <= 0:
                     raise RuntimeError("CDN returned empty response")
                 os.replace(tmp, target)
@@ -196,6 +202,12 @@ class DashDownloader:
                     raise RuntimeError(f"{label}: CDN returned empty response")
                 time.sleep(min(2**attempt, 8))
                 continue
+            if self._looks_like_html(tmp):
+                tmp.unlink(missing_ok=True)
+                if attempt == self.config.download.retries:
+                    raise RuntimeError(f"{label}: CDN returned an HTML error page")
+                time.sleep(min(2**attempt, 8))
+                continue
             if expected and done < expected:
                 tmp.unlink(missing_ok=True)
                 if attempt == self.config.download.retries:
@@ -229,6 +241,17 @@ class DashDownloader:
         except OSError:
             return False
 
+    # Кусок похож на HTML-страницу ошибки, а не на медиаданные
+    @staticmethod
+    def _looks_like_html(path: Path) -> bool:
+        try:
+            with path.open("rb") as file:
+                head = file.read(512)
+        except OSError:
+            return False
+        text = head.lstrip().lower()
+        return text.startswith(b"<!doctype") or (text[:1] == b"<" and b"<html" in text)
+
     # Полное скачивание трека: init, затем сегменты через постоянный пул.
     # Готовые части предыдущих попыток переиспользуются (резюм на 99%+)
     async def download_track(
@@ -256,7 +279,9 @@ class DashDownloader:
             init_url = self.resolve_segment_url(base, template.get("initialization", ""))
             if not init_url:
                 raise RuntimeError(f"{label}: invalid initialization URL")
-            self._download_resource(init_url, headers, init_path, f"{label} initialization")
+            self._download_resource(
+                init_url, headers, init_path, f"{label} initialization", cookies
+            )
         pending = [
             index
             for index in range(len(segments))
@@ -274,7 +299,7 @@ class DashDownloader:
         )
         try:
             await self._download_segments(
-                executor, segments, pending, base, media, headers, parts_dir, label
+                executor, segments, pending, base, media, headers, parts_dir, label, cookies
             )
         finally:
             executor.shutdown(wait=True)
@@ -293,6 +318,7 @@ class DashDownloader:
         headers: dict[str, str],
         parts_dir: Path,
         label: str,
+        cookies: "requests.cookies.RequestsCookieJar | None" = None,
     ) -> None:
         loop = asyncio.get_running_loop()
         download_cfg = self.config.download
@@ -323,7 +349,7 @@ class DashDownloader:
                 )
                 with gate:
                     return self._download_resource(
-                        url, headers, part_file, f"{label} segment {index + 1}"
+                        url, headers, part_file, f"{label} segment {index + 1}", cookies
                     )
 
             try:

@@ -71,6 +71,7 @@ class FFmpegMerger:
             capture_output=True,
             text=True,
             check=False,
+            timeout=30,
         )
         try:
             return float(result.stdout.strip())
@@ -192,10 +193,11 @@ class FFmpegMerger:
             # канала блокирует ffmpeg и мы зависаем на чтении stdout
             stderr_chunks: list[str] = []
             if process.stderr:
-                threading.Thread(
+                stderr_thread = threading.Thread(
                     target=lambda: stderr_chunks.append(process.stderr.read()),
                     daemon=True,
-                ).start()
+                )
+                stderr_thread.start()
             if process.stdout:
                 for line in process.stdout:
                     if line.startswith("out_time_ms=") and duration:
@@ -205,6 +207,8 @@ class FFmpegMerger:
                             continue
                         self.console.progress("Merged", progress, duration, started)
             code = process.wait()
+            if process.stderr is not None:
+                stderr_thread.join(timeout=5)
         except OSError as exc:
             tmp_output.unlink(missing_ok=True)
             raise FFmpegMergeError(f"ffmpeg failed to start: {exc}") from exc
