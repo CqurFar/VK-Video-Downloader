@@ -19,6 +19,8 @@ wheels/
 /downloaded/
 urls.txt
 failed.txt
+AGENTS.md
+CONTEXT.md
 
 # Локальные файлы
 packages/ffmpeg/*
