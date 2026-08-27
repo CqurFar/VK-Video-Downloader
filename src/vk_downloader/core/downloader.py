@@ -56,6 +56,38 @@ class VKMediaDownloader:
             flags=re.I,
         )
 
+    # Фильтрация cookies по domain/path — не шлём лишние session cookies на CDN
+    @staticmethod
+    def _filter_cookies(
+        cookies: list[dict],
+        *urls: str | None,
+    ) -> list[dict]:
+        if not cookies:
+            return []
+        allowed_hosts = set()
+        for u in urls:
+            if not u:
+                continue
+            try:
+                p = urlparse(u)
+                if p.netloc:
+                    allowed_hosts.add(p.netloc.lower().split(":")[0])
+            except Exception:
+                continue
+        if not allowed_hosts:
+            return [c for c in cookies if c.get("name")]
+
+        filtered: list[dict] = []
+        for c in cookies:
+            name = c.get("name")
+            if not name:
+                continue
+            domain = (c.get("domain") or "").lstrip(".").lower()
+            if domain and not any(h == domain or h.endswith("." + domain) for h in allowed_hosts):
+                continue
+            filtered.append(c)
+        return filtered
+
     # Сопоставление кодека трека с семейством по первому компоненту fourcc:
     # подстрочный поиск не работает ("vp9" отсутствует в реальном "vp09.00.10.08")
     @staticmethod
@@ -203,27 +235,34 @@ class VKMediaDownloader:
             title = f"VK-{match.group(1)}" if match else self.config.naming.fallback_name
         suffix = f"{index:02d}_[{self.config.logs.log_id}]"
         base_dir = self.config.paths.output_dir / folder if folder else self.config.paths.output_dir
-        base_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(lambda: base_dir.mkdir(parents=True, exist_ok=True))
         final = base_dir / f"{title}_{suffix}.{output_format}"
         mpd_file = self.config.paths.logs_dir / f"{title}_{suffix}.mpd"
 
         if self.config.logs.save_mpd:
-            mpd_file.write_text(self._redact_mpd(data["mpd_text"]), encoding="utf-8")
+            await asyncio.to_thread(
+                lambda: mpd_file.write_text(self._redact_mpd(data["mpd_text"]), encoding="utf-8")
+            )
 
         headers = DashDownloader.media_headers(
             data["user_agent"],
             url,
             data.get("video_segment_url") or data.get("audio_segment_url") or data["mpd_url"],
         )
-        cookies = "; ".join(
-            f"{c.get('name')}={c.get('value')}" for c in data.get("cookies", []) if c.get("name")
+        filtered = self._filter_cookies(
+            data.get("cookies", []),
+            data.get("video_segment_url"),
+            data.get("audio_segment_url"),
+            data["mpd_url"],
+            url,
         )
+        cookies = "; ".join(f"{c.get('name')}={c.get('value')}" for c in filtered)
         if cookies:
             headers["Cookie"] = cookies
 
         temp_dir = self.config.paths.output_dir / self.config.paths.temp_name
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        FSPaths.hide(temp_dir)
+        await asyncio.to_thread(lambda: temp_dir.mkdir(parents=True, exist_ok=True))
+        await asyncio.to_thread(FSPaths.hide, temp_dir)
         video_tmp = temp_dir / f"{title}_{suffix}.video.m4s"
         audio_tmp = temp_dir / f"{title}_{suffix}.audio.m4s"
         try:
@@ -261,7 +300,8 @@ class VKMediaDownloader:
                     temp_dir,
                 )
             self.console.write(f"Merged: {final.name}")
-            self.merger.merge(
+            await asyncio.to_thread(
+                self.merger.merge,
                 video_tmp if video else None,
                 audio_tmp if audio else None,
                 final,
@@ -270,8 +310,8 @@ class VKMediaDownloader:
                 audio,
             )
         finally:
-            video_tmp.unlink(missing_ok=True)
-            audio_tmp.unlink(missing_ok=True)
+            await asyncio.to_thread(video_tmp.unlink, missing_ok=True)
+            await asyncio.to_thread(audio_tmp.unlink, missing_ok=True)
         return title
 
     # Загрузка файла с автоматическими повторами перед ручным ретраем
@@ -528,7 +568,11 @@ class VKMediaDownloader:
             title, links = await self.browser_helper.extract_playlist(browser, playlist_url.strip())
             links = [self.normalize_url(link) for link in links]
             self.console.status(f'Playlist "{title}" -> {len(links)} videos')
-            Path(self.config.paths.urls_file).write_text("\n".join(links) + "\n", encoding="utf-8")
+            await asyncio.to_thread(
+                Path(self.config.paths.urls_file).write_text,
+                "\n".join(links) + "\n",
+                encoding="utf-8",
+            )
             return [(None, title, links)]
         return [(None, None, urls)]
 
@@ -694,10 +738,15 @@ class VKMediaDownloader:
         audio_quality: str,
         output_format: str,
     ) -> list[dict]:
-        with open(playlist_file.strip(), encoding="utf-8") as file:
-            playlists = [
-                line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")
-            ]
+        def _read_playlists() -> list[str]:
+            with open(playlist_file.strip(), encoding="utf-8") as file:
+                return [
+                    line.strip()
+                    for line in file
+                    if line.strip() and not line.lstrip().startswith("#")
+                ]
+
+        playlists = await asyncio.to_thread(_read_playlists)
         dead: list[dict] = []
         for number, playlist in enumerate(dict.fromkeys(playlists), start=1):
             result = await self._extract_with_retry(browser, playlist)
@@ -852,7 +901,7 @@ class VKMediaDownloader:
                 _debug_flag,
                 advanced,
                 debug_mode,
-            ) = self.parse_args()
+            ) = await asyncio.to_thread(self.parse_args)
             if debug_mode:
                 self.config.apply_debug()
             if advanced or debug_mode:
@@ -862,9 +911,9 @@ class VKMediaDownloader:
                 self.console.mode = "normal"
             if debug_mode:
                 self.console.status("Debug mode enabled (logs, mpd dumps, longer timeouts)")
-            self.config.prepare()
+            await asyncio.to_thread(self.config.prepare)
             self.console.banner()
-            self.preflight()
+            await asyncio.to_thread(self.preflight)
             browser = await self.browser_helper.launch()
             if self.console.is_normal():
                 self.console.status_line("FireFox Connection", True)

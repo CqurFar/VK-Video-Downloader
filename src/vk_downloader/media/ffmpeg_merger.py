@@ -208,7 +208,6 @@ class FFmpegMerger:
         except OSError as exc:
             tmp_output.unlink(missing_ok=True)
             raise FFmpegMergeError(f"ffmpeg failed to start: {exc}") from exc
-        elapsed = time.time() - started
         stderr = (stderr_chunks[0] if stderr_chunks else "").strip()
         elapsed = time.time() - started
         self.console.log("")
