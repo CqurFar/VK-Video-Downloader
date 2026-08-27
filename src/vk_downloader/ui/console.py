@@ -297,10 +297,8 @@ class Console:
     def is_normal(self) -> bool:
         return self.mode == "normal"
 
-    # Большая приветственная надпись
+    # Большая приветственная надпись (во всех режимах)
     def banner(self) -> None:
-        if not self.is_normal():
-            return
         self._always(BANNER)
 
     # Начало работы над плейлистом

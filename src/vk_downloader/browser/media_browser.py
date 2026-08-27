@@ -392,18 +392,10 @@ class VKMediaBrowser:
             except Exception:
                 self._player_window = None
         if not self._player_window:
-            # Отдельное окно меньше мешает вкладкам пользователя, чем новая вкладка
-            new_win = browser.open_new_window()
-            if new_win:
-                self._player_window = new_win
-                with contextlib.suppress(Exception):
-                    browser._request(
-                        "POST",
-                        f"/session/{browser.session_id}/window/rect",
-                        {"width": 1280, "height": 800, "x": 10, "y": 10},
-                    )
-            else:
-                self._player_window = browser.open_new_tab()
+            # Фоновая вкладка в том же окне вместо нового окна: не перехватывает
+            # фокус пользователя и не разворачивается на весь экран. open_new_tab
+            # сам возвращает фокус родительской вкладке после создания.
+            self._player_window = browser.open_new_tab()
         browser.switch_window(self._player_window)
         browser.set_script_timeout(self.config.browser.script_timeout)
         browser.execute(
