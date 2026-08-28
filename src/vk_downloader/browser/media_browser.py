@@ -187,6 +187,7 @@ class VKMediaBrowser:
         self.own_geckodriver = False
         self._playback_started = False
         self._player_window: str | None = None
+        self._parent_window: str | None = None
 
     # Подключение к Firefox: существующая сессия или запуск geckodriver
     async def launch(self) -> FirefoxRemoteSession:
@@ -292,10 +293,36 @@ class VKMediaBrowser:
         except Exception:
             return False
 
+    # Выполнение JS в окне плеера с возвратом фокуса родительскому окну.
+    # Отдельное окно остаётся видимым (не hidden), но не крадёт фокус ОС.
+    def _exec_in_player(
+        self,
+        browser: FirefoxRemoteSession,
+        script: str,
+        args: list | None = None,
+        async_: bool = False,
+    ):
+        if not self._player_window:
+            return browser.execute_async(script, args) if async_ else browser.execute(script, args)
+        browser.switch_window(self._player_window)
+        try:
+            return browser.execute_async(script, args) if async_ else browser.execute(script, args)
+        finally:
+            if self._parent_window and self._parent_window in browser.window_handles():
+                browser.switch_window(self._parent_window)
+
     # Вкладка считается скрытой, если окно свёрнуто или не видно
     async def _hidden_tab(self, browser: FirefoxRemoteSession) -> bool:
         try:
-            state = browser.execute("return document.visibilityState || '';")
+            if not self._player_window:
+                state = browser.execute("return document.visibilityState || '';")
+            else:
+                browser.switch_window(self._player_window)
+                try:
+                    state = browser.execute("return document.visibilityState || '';")
+                finally:
+                    if self._parent_window and self._parent_window in browser.window_handles():
+                        browser.switch_window(self._parent_window)
         except Exception:
             return False
         return str(state or "").lower() == "hidden"
@@ -329,11 +356,15 @@ class VKMediaBrowser:
     # Основной сценарий: открыть embed, получить MPD и DASH-трафик
     async def get_mpd(self, browser: FirefoxRemoteSession, url: str) -> MediaSession:
         parent_window = self._recover_context(browser)
+        self._parent_window = parent_window
         try:
             for attempt in range(1, self.config.browser.context_attempts + 1):
                 try:
                     await self._open_player_tab(browser, url)
-                    user_agent = browser.execute("return navigator.userAgent;") or "Mozilla/5.0"
+                    user_agent = (
+                        self._exec_in_player(browser, "return navigator.userAgent;")
+                        or "Mozilla/5.0"
+                    )
                     title = await self._read_title(browser)
                     # Свёрнутое окно => hidden-вкладка: плеер не стартует вовсе
                     if await self._hidden_tab(browser):
@@ -381,6 +412,7 @@ class VKMediaBrowser:
                     await asyncio.sleep(attempt)
         finally:
             self._back_to_parent(browser, player_window=None, parent_window=parent_window)
+            self._parent_window = None
 
     # Переиспользование одной вкладки плеера между видео вместо плодения вкладок
     async def _open_player_tab(self, browser: FirefoxRemoteSession, url: str) -> str:
@@ -392,14 +424,17 @@ class VKMediaBrowser:
             except Exception:
                 self._player_window = None
         if not self._player_window:
-            # Фоновая вкладка в том же окне вместо нового окна: не перехватывает
-            # фокус пользователя и не разворачивается на весь экран. open_new_tab
-            # сам возвращает фокус родительской вкладке после создания.
-            self._player_window = browser.open_new_tab()
+            # Отдельное окно плеера (не вкладка текущего окна): пользователь
+            # остаётся на своей странице. Окно не на весь экран и не перехватывает
+            # фокус ОС — execute-вызовы возвращают фокус родителю через
+            # _exec_in_player. open_new_window сам возвращает фокус родителю.
+            self._player_window = browser.open_new_window()
+            browser.set_window_rect(self._player_window, 960, 600, 80, 80)
         browser.switch_window(self._player_window)
         browser.set_script_timeout(self.config.browser.script_timeout)
-        browser.execute(
-            "if (window.performance) { performance.setResourceTimingBufferSize(20000); performance.clearResourceTimings(); }"
+        self._exec_in_player(
+            browser,
+            "if (window.performance) { performance.setResourceTimingBufferSize(20000); performance.clearResourceTimings(); }",
         )
         browser.navigate(url)
         return self._player_window
@@ -467,7 +502,7 @@ class VKMediaBrowser:
         self.console.spin_start("Extracting playlist links")
         title, links = "", []
         try:
-            raw = browser.execute_async(self.PLAYLIST_JS)
+            raw = self._exec_in_player(browser, self.PLAYLIST_JS, async_=True)
             payload = raw if isinstance(raw, dict) else {}
             title = str(payload.get("title") or "").strip()
             links = list(
@@ -495,7 +530,7 @@ class VKMediaBrowser:
         )
         deadline = time.monotonic() + self.config.browser.title_wait_seconds
         while True:
-            title = (browser.execute(title_js) or "").strip()
+            title = (self._exec_in_player(browser, title_js) or "").strip()
             if not self._generic_title(title) or time.monotonic() > deadline:
                 return title
             await asyncio.sleep(0.5)
@@ -527,7 +562,7 @@ class VKMediaBrowser:
                 if await self._hidden_tab(browser):
                     self._raise_windows()
                 try:
-                    stats = browser.execute(self.PLAYER_JS)
+                    stats = self._exec_in_player(browser, self.PLAYER_JS)
                     stats = stats if isinstance(stats, dict) else {}
                 except Exception:
                     stats = {}
@@ -594,7 +629,7 @@ class VKMediaBrowser:
     # Ресурсы performance API текущей вкладки
     def _resource_entries(self, browser: FirefoxRemoteSession) -> list[str]:
         try:
-            entries = browser.execute(self.RESOURCES_JS) or []
+            entries = self._exec_in_player(browser, self.RESOURCES_JS) or []
             return [entry.get("url", "") for entry in entries if isinstance(entry, dict)]
         except Exception:
             return []
@@ -602,7 +637,7 @@ class VKMediaBrowser:
     # URL из DOM текущей вкладки
     async def _dom_urls(self, browser: FirefoxRemoteSession) -> list[str]:
         try:
-            return list(dict.fromkeys(browser.execute(self.DOM_URLS_JS) or []))
+            return list(dict.fromkeys(self._exec_in_player(browser, self.DOM_URLS_JS) or []))
         except Exception:
             return []
 
@@ -649,7 +684,7 @@ class VKMediaBrowser:
     # Загрузка кандидата через fetch внутри браузера
     async def _fetch_in_browser(self, browser: FirefoxRemoteSession, url: str) -> str | None:
         try:
-            result = browser.execute_async(self.FETCH_JS, [url])
+            result = self._exec_in_player(browser, self.FETCH_JS, [url], async_=True)
         except Exception:
             return None
         if not isinstance(result, dict) or result.get("status") not in (200, 206):

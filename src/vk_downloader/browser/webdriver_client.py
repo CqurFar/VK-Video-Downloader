@@ -218,6 +218,16 @@ class FirefoxRemoteSession:
             {"script": script, "args": args or []},
         )
 
+    # Установка размера/позиции окна: не на весь экран, компактное
+    def set_window_rect(self, handle: str, width: int, height: int, x: int, y: int) -> None:
+        with contextlib.suppress(Exception):
+            self.switch_window(handle)
+        self._request(
+            "POST",
+            f"/session/{self.session_id}/window/rect",
+            {"width": width, "height": height, "x": x, "y": y},
+        )
+
     # Таймаут выполнения JS
     def set_script_timeout(self, seconds: int) -> None:
         self._request("POST", f"/session/{self.session_id}/timeouts", {"script": seconds * 1000})
