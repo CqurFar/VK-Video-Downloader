@@ -19,7 +19,12 @@ class MPDParser:
         videos, audios = [], []
         mpd_base = cls.direct_base_url(root)
         root_base = urljoin(mpd_url, mpd_base) if mpd_base else mpd_url
-        for period in cls.children_by_name(root, "Period"):
+        periods = cls.children_by_name(root, "Period")
+        mpd_duration = cls.parse_iso8601_duration(root.attrib.get("mediaPresentationDuration"))
+        for period in periods:
+            period_duration = cls.parse_iso8601_duration(period.attrib.get("duration"))
+            if period_duration is None and len(periods) == 1:
+                period_duration = mpd_duration
             period_base = cls.direct_base_url(period)
             period_full_base = urljoin(root_base, period_base) if period_base else root_base
             for adaptation in cls.children_by_name(period, "AdaptationSet"):
@@ -34,7 +39,9 @@ class MPDParser:
                 template = cls.child_by_name(adaptation, "SegmentTemplate")
                 inherited_template = dict(template.attrib) if template is not None else {}
                 inherited_timeline = (
-                    cls.parse_segment_timeline(template) if template is not None else []
+                    cls.parse_segment_timeline(template, period_duration)
+                    if template is not None
+                    else []
                 )
                 for rep in cls.children_by_name(adaptation, "Representation"):
                     track = cls.build_track(
@@ -45,6 +52,7 @@ class MPDParser:
                         inherited_timeline,
                         full_base,
                         mpd_url,
+                        period_duration,
                     )
                     if track is None:
                         continue
@@ -68,13 +76,14 @@ class MPDParser:
         inherited_timeline: list[dict],
         base: str,
         mpd_url: str,
+        period_duration: float | None = None,
     ) -> dict | None:
         template = cls.child_by_name(rep, "SegmentTemplate")
         template_data = dict(inherited_template)
         timeline = list(inherited_timeline)
         if template is not None:
             template_data.update(template.attrib)
-            timeline = cls.parse_segment_timeline(template)
+            timeline = cls.parse_segment_timeline(template, period_duration)
         # База трека: собственный BaseURL, иначе унаследованная цепочка, иначе папка MPD
         rep_base = cls.direct_base_url(rep)
         track_base = (
@@ -117,8 +126,9 @@ class MPDParser:
         return value or None
 
     # Раскрутка SegmentTemplate + SegmentTimeline в список сегментов
+    # period_duration — длительность периода в секундах (MPD/Period), если известна
     @classmethod
-    def parse_segment_timeline(cls, template) -> list[dict]:
+    def parse_segment_timeline(cls, template, period_duration: float | None = None) -> list[dict]:
         if template is None:
             return []
         timeline = cls.child_by_name(template, "SegmentTimeline")
@@ -138,7 +148,9 @@ class MPDParser:
             count = (
                 repeat + 1
                 if repeat >= 0
-                else cls.negative_repeat_count(items, index, current_time, duration)
+                else cls.negative_repeat_count(
+                    items, index, current_time, duration, timescale, period_duration
+                )
             )
             for _ in range(count):
                 segments.append(
@@ -153,17 +165,51 @@ class MPDParser:
                 current_time += duration
         return segments
 
-    # Число повторов при отрицательном r: до следующего явного t
+    # Число повторов при отрицательном r: до следующего явного t или до конца периода
     @classmethod
     def negative_repeat_count(
-        cls, items: list, index: int, current_time: int, duration: int
+        cls,
+        items: list,
+        index: int,
+        current_time: int,
+        duration: int,
+        timescale: int = 1,
+        period_duration: float | None = None,
     ) -> int:
         for next_segment in items[index + 1 :]:
             if "t" not in next_segment.attrib:
                 continue
             next_time = cls.to_int(next_segment.attrib.get("t"))
             return max((next_time - current_time) // duration, 1) if next_time > current_time else 1
+        # Последний S с r=-1: пробуем оценить по длительности периода
+        if period_duration is not None and duration > 0 and timescale > 0:
+            try:
+                remaining = period_duration * timescale - current_time
+                if remaining > 0:
+                    return max(int(remaining // duration), 1)
+            except Exception:
+                pass
         return 1
+
+    @staticmethod
+    def parse_iso8601_duration(value: str | None) -> float | None:
+        """Парсит ISO8601 duration PT... в секунды, возвращает None если не удалось."""
+        if not value or not isinstance(value, str):
+            return None
+        value = value.strip()
+        if not value.startswith("PT"):
+            return None
+        # PT[H]H[M]M[S]S, например PT1H2M3.5S
+        import re
+
+        m = re.match(r"^PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?$", value)
+        if not m:
+            return None
+        hours = float(m.group(1) or 0)
+        minutes = float(m.group(2) or 0)
+        seconds = float(m.group(3) or 0)
+        total = hours * 3600 + minutes * 60 + seconds
+        return total if total > 0 else None
 
     # Удаление дублей треков по ключевым полям
     @staticmethod
