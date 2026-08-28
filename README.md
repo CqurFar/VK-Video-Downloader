@@ -221,6 +221,8 @@ uv run vk-dl "https://..." --ffmpeg "-ss 30"
 | `--mode normal\|advanced\|debug` | то же самое одним флагом (`debug` = advanced + логи) |
 | `--debug` | advanced + дампы `*.mpd` в `downloaded/logs/`, логи, полные traceback'и |
 
+> **Privacy:** дампы `*.mpd` и логи в `--debug` могут содержать подписанные CDN-URL (`token=`, `sig=` и т.д.). Не публикуйте их — значения маскируются как `***`.
+
 ```powershell
 uv run vk-dl "https://..." --mode advanced
 uv run vk-dl "https://..." --debug

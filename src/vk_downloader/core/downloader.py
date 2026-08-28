@@ -44,6 +44,18 @@ class VKMediaDownloader:
         match = re.search(r"[?&]id=(\d+)", url)
         return f"VK-{match.group(1)}" if match else url[-45:]
 
+    # Маскирование signed URL в debug-дампах mpd (token/sig/hashes)
+    @staticmethod
+    def _redact_mpd(text: str) -> str:
+        # маскируем значения чувствительных query-параметров, оставляя ключ
+        # учитывает как & так и &amp; в XML
+        return re.sub(
+            r"((?:[?&]|&amp;)(?:token|sig2?|hash|extra|expires?|exp|hdnts|src|hd|uid)[^=&]*)=[^&\"'<>\\s]+",
+            r"\1=***",
+            text,
+            flags=re.I,
+        )
+
     # Сопоставление кодека трека с семейством по первому компоненту fourcc:
     # подстрочный поиск не работает ("vp9" отсутствует в реальном "vp09.00.10.08")
     @staticmethod
@@ -66,9 +78,14 @@ class VKMediaDownloader:
         videos = sorted(videos, key=lambda t: (t["height"], t["bandwidth"]))
         if not videos:
             raise QualityNotAvailableError("No video track available")
-        if target == "best" or isinstance(target, int):
-            exact = [t for t in videos if t["height"] == target] if isinstance(target, int) else []
-            return exact[-1] if exact else videos[-1]
+        if target == "best":
+            return videos[-1]
+        if isinstance(target, int):
+            exact = [t for t in videos if t["height"] == target]
+            if exact:
+                return exact[-1]
+            greater = [t for t in videos if t["height"] >= target]
+            return min(greater, key=lambda t: t["height"]) if greater else videos[-1]
         raise QualityNotAvailableError(f"Invalid video quality: {target}")
 
     # Выбор аудио-трека: точное совпадение цели или лучший доступный
@@ -87,13 +104,15 @@ class VKMediaDownloader:
         audios = sorted(audios, key=lambda t: t["bandwidth"])
         if not audios:
             raise QualityNotAvailableError("No audio track available")
-        if target == "best" or isinstance(target, int):
-            exact = (
-                [t for t in audios if t["bandwidth"] // 1000 == target]
-                if isinstance(target, int)
-                else []
-            )
-            return exact[-1] if exact else audios[-1]
+        if target == "best":
+            return audios[-1]
+        if isinstance(target, int):
+            exact = [t for t in audios if t["bandwidth"] // 1000 == target]
+            if exact:
+                return exact[-1]
+            value = target * 1000
+            greater = [t for t in audios if t["bandwidth"] >= value]
+            return min(greater, key=lambda t: t["bandwidth"]) if greater else audios[-1]
         raise QualityNotAvailableError(f"Invalid audio quality: {target}")
 
     # Разрешение качества трека; None означает "дорожка не нужна"
@@ -119,7 +138,11 @@ class VKMediaDownloader:
             except ValueError as exc:
                 raise QualityNotAvailableError(f"Invalid {kind} quality: {requested}") from exc
             exact = [t for t in tracks if t[field_name] == value]
-            tracks = exact or tracks
+            if exact:
+                return exact[-1]
+            greater = [t for t in tracks if t[field_name] >= value]
+            if greater:
+                return min(greater, key=lambda t: t[field_name])
         return tracks[-1]
 
     # Обработка одной ссылки от MPD до готового файла; возвращает название
@@ -185,7 +208,7 @@ class VKMediaDownloader:
         mpd_file = self.config.paths.logs_dir / f"{title}_{suffix}.mpd"
 
         if self.config.logs.save_mpd:
-            mpd_file.write_text(data["mpd_text"], encoding="utf-8")
+            mpd_file.write_text(self._redact_mpd(data["mpd_text"]), encoding="utf-8")
 
         headers = DashDownloader.media_headers(
             data["user_agent"],
