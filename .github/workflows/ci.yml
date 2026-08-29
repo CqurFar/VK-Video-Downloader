@@ -33,6 +33,24 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync
+      - name: Ruff lint
+        run: uv run ruff check src
+      - name: Ruff format check
+        run: uv run ruff format src --check
+      - name: Run tests
+        run: uv run pytest
+      - name: CLI smoke test
+        run: uv run vk-dl --help
+
   smoke:
     runs-on: ubuntu-latest
     steps:
