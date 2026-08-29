@@ -1,3 +1,5 @@
+import contextlib
+import os
 import shutil
 import subprocess
 import threading
@@ -175,8 +177,11 @@ class FFmpegMerger:
     ) -> None:
         ffmpeg = self.find_ffmpeg()
         duration = max(self.get_duration(video or audio), 0.0)
+        # Атомарный вывод: ffmpeg пишет в .tmp, затем replace
+        tmp_output = output.with_name(output.name + ".tmp")
+        tmp_output.parent.mkdir(parents=True, exist_ok=True)
         command = self.build_command(
-            ffmpeg, video, audio, output, output_format, video_track, audio_track
+            ffmpeg, video, audio, tmp_output, output_format, video_track, audio_track
         )
         started = time.time()
         try:
@@ -201,6 +206,7 @@ class FFmpegMerger:
                         self.console.progress("Merged", progress, duration, started)
             code = process.wait()
         except OSError as exc:
+            tmp_output.unlink(missing_ok=True)
             raise FFmpegMergeError(f"ffmpeg failed to start: {exc}") from exc
         elapsed = time.time() - started
         stderr = (stderr_chunks[0] if stderr_chunks else "").strip()
@@ -215,7 +221,16 @@ class FFmpegMerger:
         if duration:
             self.console.progress("Merged", duration, duration, started)
         if code != 0:
+            tmp_output.unlink(missing_ok=True)
             raise FFmpegMergeError(stderr.strip() or "FFmpeg processing failed")
+        # fsync + atomic replace
+        try:
+            with tmp_output.open("rb") as f, contextlib.suppress(OSError):
+                os.fsync(f.fileno())
+            os.replace(tmp_output, output)
+        except Exception as exc:
+            tmp_output.unlink(missing_ok=True)
+            raise FFmpegMergeError(f"atomic replace failed: {exc}") from exc
 
 
 # === Пример ===

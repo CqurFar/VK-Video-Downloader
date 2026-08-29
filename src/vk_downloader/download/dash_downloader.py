@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import shutil
 import threading
@@ -140,10 +141,12 @@ class DashDownloader:
         self, url: str, headers: dict[str, str], output: Path, label: str
     ) -> int:
         target = Path(FSPaths.long(output))
+        tmp = Path(FSPaths.long(output.with_name(output.name + ".tmp")))
         started = time.time()
         for attempt in range(1, self.config.download.retries + 1):
             done = 0
             response = None
+            tmp.unlink(missing_ok=True)
             try:
                 response = self._session(headers).get(
                     url, timeout=self.config.download.request_timeout, stream=True
@@ -152,7 +155,7 @@ class DashDownloader:
                     raise RuntimeError(f"HTTP {response.status_code}")
                 expected = int(response.headers.get("Content-Length") or 0)
                 last_paint = 0.0
-                with target.open("wb") as file:
+                with tmp.open("wb") as file:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             file.write(chunk)
@@ -163,6 +166,7 @@ class DashDownloader:
                                 self.console.progress(label, done, expected, started)
             except Exception as exc:
                 if attempt == self.config.download.retries:
+                    tmp.unlink(missing_ok=True)
                     raise RuntimeError(f"{label}: {exc}") from exc
                 # Экспоненциальная задержка перед повтором обрыва
                 time.sleep(min(2**attempt, 8))
@@ -171,15 +175,24 @@ class DashDownloader:
                 if response is not None:
                     response.close()
             if done <= 0:
+                tmp.unlink(missing_ok=True)
                 if attempt == self.config.download.retries:
                     raise RuntimeError(f"{label}: CDN returned empty response")
                 time.sleep(min(2**attempt, 8))
                 continue
             if expected and done < expected:
+                tmp.unlink(missing_ok=True)
                 if attempt == self.config.download.retries:
                     raise RuntimeError(f"{label}: incomplete download {done}/{expected} bytes")
                 time.sleep(min(2**attempt, 8))
                 continue
+            try:
+                with tmp.open("rb") as f, contextlib.suppress(OSError):
+                    os.fsync(f.fileno())
+                os.replace(tmp, target)
+            except Exception as exc:
+                tmp.unlink(missing_ok=True)
+                raise RuntimeError(f"{label}: atomic replace failed: {exc}") from exc
             if expected:
                 self.console.progress(label, expected, expected, started)
             else:
@@ -359,15 +372,24 @@ class DashDownloader:
                 f"{label}: {len(dead)} segment(s) failed permanently: [{numbers}]"
             )
 
-    # Склейка init и сегментов в итоговый файл
+    # Склейка init и сегментов в итоговый файл (атомарно)
     @staticmethod
     def assemble(parts_dir: Path, segment_count: int, output: Path) -> None:
-        with Path(FSPaths.long(output)).open("wb") as final:
+        tmp = output.with_name(output.name + ".tmp")
+        with Path(FSPaths.long(tmp)).open("wb") as final:
             with (parts_dir / "00000000.init").open("rb") as init_file:
                 shutil.copyfileobj(init_file, final, length=1024 * 1024)
             for index in range(segment_count):
                 with (parts_dir / f"{index + 1:08d}.part").open("rb") as part:
                     shutil.copyfileobj(part, final, length=1024 * 1024)
+        # fsync + atomic replace
+        try:
+            with Path(FSPaths.long(tmp)).open("rb") as f, contextlib.suppress(OSError):
+                os.fsync(f.fileno())
+            os.replace(tmp, output)
+        except Exception:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
 
 # === Пример ===
